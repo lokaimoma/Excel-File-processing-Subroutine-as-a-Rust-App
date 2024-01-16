@@ -1,4 +1,8 @@
+use serde::Serialize;
+
+#[derive(Serialize)]
 pub struct UploadFileEntry {
     pub id: String,
-    pub file_name: String,
+    #[serde(skip)]
+    pub file_path: String,
 }
