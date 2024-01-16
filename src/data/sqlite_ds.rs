@@ -62,7 +62,8 @@ impl DataSource for SqliteDataSource {
             t_name = Self::UPLOAD_TABLE_NAME,
             id_col = Self::UPLOAD_T_ID_COL
         );
-        if let Err(e) = self.0.lock().await.execute(&stmt, (id,)) {}
+
+        let _ = self.0.lock().await.execute(&stmt, (id,));
 
         Ok(())
     }

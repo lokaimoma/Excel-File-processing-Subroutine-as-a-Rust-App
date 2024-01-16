@@ -7,7 +7,7 @@ use uuid::Uuid;
 use self::model::UploadFileEntry;
 
 pub mod model;
-pub mod sqlite_data_Source;
+pub mod sqlite_ds;
 
 #[async_trait]
 pub trait DataSource: Clone {

@@ -1,12 +1,10 @@
 use crate::{
-    data::{model::UploadFileEntry, sqlite_data_Source::SqliteDataSource, DataSource},
+    data::{model::UploadFileEntry, sqlite_ds::SqliteDataSource, DataSource},
     error::Error,
 };
 use axum::{
     extract::{Multipart, State},
-    response::Html,
-    response::IntoResponse,
-    routing::{get, post},
+    routing::post,
     Json, Router,
 };
 use serde_json::json;
@@ -17,12 +15,7 @@ use tokio::fs;
 pub fn get_routes(datasource: SqliteDataSource) -> Router {
     Router::new()
         .route("/upload", post(upload_file))
-        .route("/hello", get(hello))
         .with_state(datasource)
-}
-
-async fn hello() -> impl IntoResponse {
-    Html("Hello welcome to this server")
 }
 
 async fn upload_file(
