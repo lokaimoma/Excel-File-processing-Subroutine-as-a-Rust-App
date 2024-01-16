@@ -1,0 +1,19 @@
+[package]
+name = "axum_starter"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+axum = {version="0.7.4", features=["default", "multipart", "tower-log"]}
+serde = {version="1.0.195", features=["derive", "std"]}
+serde_json = "1.0.111"
+thiserror = "1.0.56"
+tokio = {version="1.35.1", features=["rt-multi-thread", "macros", "fs"]}
+tower-http = {version="0.5.1", features=["trace"]}
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
+rusqlite = {version="0.30.0", features=["bundled"]}
+async-trait = "0.1.77"
+uuid = {version="1.6.1", features=["v7", "fast-rng", "macro-diagnostics"]}
