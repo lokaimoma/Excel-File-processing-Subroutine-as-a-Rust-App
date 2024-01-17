@@ -18,3 +18,4 @@ rusqlite = {version="0.30.0", features=["bundled"]}
 async-trait = "0.1.77"
 uuid = {version="1.6.1", features=["v7", "fast-rng", "macro-diagnostics"]}
 xlsxwriter = "0.6.0"
+calamine = "0.23.1"

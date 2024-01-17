@@ -17,8 +17,14 @@ pub enum Error {
     DatabaseOperationFailed(String),
     #[error("No entry found with the id {0}")]
     NoEntryFound(String),
-    #[error("Invalid xlsx file: {0}")]
-    InValidXLSXFIle(String),
+    #[error("Invalid Excel file: {0}")]
+    InValidExcelFile(String),
+    #[error("Invalid payload: {0}")]
+    InvalidPayload(String),
+    #[error("IO Error: {0}")]
+    IOError(String),
+    #[error("{0}")]
+    Generic(String),
 }
 
 impl IntoResponse for Error {

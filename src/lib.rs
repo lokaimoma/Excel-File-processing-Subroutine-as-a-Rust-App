@@ -4,9 +4,9 @@ use data::{sqlite_ds::SqliteDataSource, DataSource};
 use rusqlite::Connection;
 use tower_http::trace::TraceLayer;
 
-pub mod data;
+mod data;
 pub mod error;
-pub mod web;
+mod web;
 
 pub type Result<T> = std::result::Result<T, error::Error>;
 
