@@ -11,6 +11,7 @@ use serde_json::json;
 use serde_json::Value;
 use std::path::PathBuf;
 use tokio::fs;
+use xlsxwriter;
 
 pub fn get_routes(datasource: SqliteDataSource) -> Router {
     Router::new()
@@ -36,7 +37,11 @@ async fn upload_file(
 
     let field = field.unwrap();
 
-    let fname = field.file_name().unwrap_or("no_file_name.xlsx").to_string();
+    let fname = field.file_name();
+    if fname.is_none() {
+        return Err(Error::NoFileUploaded);
+    }
+    let fname = fname.unwrap().to_string();
     let bytes = field.bytes().await.unwrap();
 
     let mut file_path = PathBuf::from(".\\data");
@@ -60,6 +65,11 @@ async fn upload_file(
     let f_entry = UploadFileEntry {
         id: id.unwrap().into(),
         file_path: file_path.to_string_lossy().to_string(),
+    };
+
+    if let Err(e) = xlsxwriter::Workbook::new(file_path) {
+        fs::remove_file(file_path).await;
+        return Err(Error::InValidXLSXFIle(e.to_string()));
     };
 
     Ok(Json(json!(f_entry)))

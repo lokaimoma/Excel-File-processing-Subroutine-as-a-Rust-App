@@ -9,7 +9,7 @@ use thiserror::Error;
 pub enum Error {
     #[error("Error parsing multipart data: {0}")]
     UploadFailed(String),
-    #[error("Expected a file but none was uploaded")]
+    #[error("Expected a file but none was uploaded or file was corrupted")]
     NoFileUploaded,
     #[error("Error writing uploaded file {0} to disk")]
     WritingToDisk(String),
@@ -17,6 +17,8 @@ pub enum Error {
     DatabaseOperationFailed(String),
     #[error("No entry found with the id {0}")]
     NoEntryFound(String),
+    #[error("Invalid xlsx file: {0}")]
+    InValidXLSXFIle(String),
 }
 
 impl IntoResponse for Error {
