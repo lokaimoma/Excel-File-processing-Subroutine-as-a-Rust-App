@@ -16,8 +16,11 @@ use axum::{
 use calamine::{open_workbook_auto, DataType, Reader};
 use serde_json::json;
 use serde_json::Value;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 use tokio::fs;
+use umya_spreadsheet::reader;
+
+const DATA_DIR: &str = ".\\data";
 
 pub fn get_routes(datasource: SqliteDataSource) -> Router {
     Router::new()
@@ -31,7 +34,7 @@ struct JobDetails {
     file_id: String,
     contraction_file: Option<Bytes>,
     search_terms: Vec<String>,
-    check_date: bool,
+    check_date_cols: Vec<u32>,
 }
 
 impl JobDetails {
@@ -53,15 +56,15 @@ impl JobDetails {
         &self.search_terms
     }
 
-    fn check_date(&self) -> bool {
-        self.check_date
+    fn check_date_cols(&self) -> &Vec<u32> {
+        &self.check_date_cols
     }
 
     async fn try_from(mut value: Multipart) -> Result<Self> {
         let mut file_id: Option<String> = None;
         let mut contraction_file: Option<Bytes> = None;
         let mut search_terms: Vec<String> = Vec::with_capacity(5);
-        let mut check_date: bool = false;
+        let mut check_date_cols: Vec<u32> = Vec::new();
 
         let mut search_t_counter = 0;
 
@@ -80,11 +83,19 @@ impl JobDetails {
                 JobDetails::SEARCH_TERMS_FIELD_N => {
                     if search_t_counter < JobDetails::SEARCH_TERM_COUNTER_LIMIT {
                         let text = field.text().await?;
-                        search_terms.insert(search_t_counter, text.to_owned());
+                        search_terms.insert(search_t_counter, text.into());
                         search_t_counter += 1;
                     }
                 }
-                JobDetails::CHECK_DATE_FIELD_N => check_date = true,
+                JobDetails::CHECK_DATE_FIELD_N => {
+                    let text = field.text().await?;
+                    let text = text.trim();
+                    let number = text.parse::<u32>();
+                    if number.is_err() {
+                        return Err(Error::Generic(format!("Invalid column index: {}", text)));
+                    }
+                    check_date_cols.push(number.unwrap());
+                }
                 _ => {}
             }
         }
@@ -96,15 +107,113 @@ impl JobDetails {
         Ok(Self {
             file_id: file_id.unwrap(),
             contraction_file,
-            check_date,
+            check_date_cols,
             search_terms,
         })
     }
 }
 
-async fn run_job(mut multipart: Multipart) -> Result<Json<Value>> {
+async fn run_job(
+    State(datasource): State<SqliteDataSource>,
+    mut multipart: Multipart,
+) -> Result<Json<Value>> {
     let job_detail = JobDetails::try_from(multipart).await?;
+    let main_file = datasource
+        .get_file_entry(job_detail.file_id().to_owned())
+        .await?;
+    let main_file = reader::xlsx::read(main_file.file_path);
+    if main_file.is_err() {
+        return Err(Error::IOError(main_file.err().unwrap().to_string()));
+    }
+    let spreedsheet = main_file.unwrap();
+    let first_sheet = spreedsheet.get_sheet(&0usize);
+    if first_sheet.is_err() {
+        return Err(Error::InValidExcelFile(first_sheet.err().unwrap().into()));
+    }
+    let first_sheet = first_sheet.unwrap();
+
+    let (first_col_idx, first_row_idx) = (1, 1);
+    let (last_col_idx, last_row_idx) = first_sheet.get_highest_column_and_row();
+
+    validate_sheet(
+        first_col_idx,
+        last_col_idx,
+        first_sheet,
+        first_row_idx,
+        &job_detail,
+        last_row_idx,
+    )?;
+
     todo!()
+}
+
+fn validate_sheet(
+    first_col_idx: u32,
+    last_col_idx: u32,
+    first_sheet: &umya_spreadsheet::Worksheet,
+    first_row_idx: u32,
+    job_detail: &JobDetails,
+    last_row_idx: u32,
+) -> Result<()> {
+    // verify header row has no empty values
+    for col_idx in first_col_idx..=last_col_idx {
+        let row_val = first_sheet.get_value((col_idx, first_row_idx));
+        if row_val.trim().is_empty() {
+            return Err(Error::Generic("Incomplete title bar".into()));
+        }
+    }
+
+    // verify cols with date
+    for col_idx in job_detail.check_date_cols() {
+        for row_idx in first_row_idx + 1..=last_row_idx {
+            let value = first_sheet.get_value((col_idx, &row_idx));
+            if value.len() < 6 {
+                return Err(Error::Generic(format!(
+                    "Invalid date value at column: {}, row: {}",
+                    col_idx, row_idx
+                )));
+            }
+            let month = &value[0..2];
+            let month_val = month.parse::<u32>();
+            if month_val.is_err() {
+                return Err(Error::Generic(format!(
+                    "Invalid month value for date field. Value = {}, column: {}, row: {}",
+                    month, col_idx, row_idx
+                )));
+            }
+            let month_val = month_val.unwrap();
+            if month_val < 1 || month_val > 12 {
+                return Err(Error::Generic(format!(
+                    "Invalid month value for date field. Value = {}, column: {}, row: {}",
+                    month, col_idx, row_idx
+                )));
+            }
+            let day = &value[2..4];
+            let day_val = day.parse::<u32>();
+            if day_val.is_err() {
+                return Err(Error::Generic(format!(
+                    "Invalid day value for date field. Value = {}, column: {}, row: {}",
+                    day, col_idx, row_idx
+                )));
+            }
+            let day_val = day_val.unwrap();
+            if day_val < 1 || day_val > 31 {
+                return Err(Error::Generic(format!(
+                    "Invalid day value for date field. Value = {}, column: {}, row: {}",
+                    day, col_idx, row_idx
+                )));
+            }
+            let year = &value[4..6];
+            let year_val = year.parse::<u32>();
+            if year_val.is_err() {
+                return Err(Error::Generic(format!(
+                    "Invalid year value for date field. Value = {}, column: {}, row: {}",
+                    year, col_idx, row_idx
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn get_header_row(
@@ -187,7 +296,7 @@ async fn upload_file(
     let fname = fname.unwrap().to_string();
     let bytes = field.bytes().await.unwrap();
 
-    let mut file_path = PathBuf::from(".\\data");
+    let mut file_path = PathBuf::from(DATA_DIR);
     if !file_path.exists() {
         let _ = fs::create_dir_all(&file_path).await;
     }
