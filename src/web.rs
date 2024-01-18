@@ -33,13 +33,8 @@ async fn run_job(
     State(datasource): State<SqliteDataSource>,
     multipart: Multipart,
 ) -> Result<Json<Value>> {
-    const FIRST_SEARCH_HTML_TEXT: &str = r##"{before}<font color="red">{value}</font>{after}"##;
-    const SECOND_SEARCH_HTML_TEXT: &str =
-        r##"{before}<font color="#ADD8E6">{value}</font>{after}"##;
-    const THIRD_SEARCH_HTML_TEXT: &str = r##"{before}<font color="#90EE90">{value}</font>{after}"##;
-    const FOURTH_SEARCH_HTML_TEXT: &str =
-        r##"{before}<font color="#A020F0">{value}</font>{after}"##;
-    const FIFTH_SEARCH_HTML_TEXT: &str = r##"{before}<font color="#FFC0CB">{value}</font>{after}"##;
+    const SEARCH_HTML_REPLACEMENT_TEXT: &str =
+        r##"{before}<font color="{txtcolor}" bgcolor="{bgcolor}">{value}</font>{after}"##;
 
     let job_detail = JobDetails::try_from(multipart).await?;
     let main_file = datasource
@@ -71,7 +66,17 @@ async fn run_job(
     let mut contraction_f_path = PathBuf::from(DATA_DIR);
     let contraction_f_name = format!("contraction_{}.xlsx", uuid::Uuid::now_v7());
     contraction_f_path.push(contraction_f_name);
+    let contraction_str: Vec<String> =
+        get_contraction_texts(job_detail, contraction_f_path).await?;
 
+    todo!()
+}
+
+async fn get_contraction_texts(
+    job_detail: JobDetails,
+    contraction_f_path: PathBuf,
+) -> Result<Vec<String>> {
+    let mut contraction_str: Vec<String> = Vec::new();
     if job_detail.contraction_file().is_some() {
         if let Err(e) = fs::write(
             &contraction_f_path,
@@ -84,9 +89,36 @@ async fn run_job(
                 e.to_string()
             )));
         };
-    }
 
-    todo!()
+        let contraction_wkbook = reader::xlsx::read(&contraction_f_path);
+
+        if contraction_wkbook.is_err() {
+            return Err(Error::IOError(
+                contraction_wkbook.err().unwrap().to_string(),
+            ));
+        }
+
+        let contraction_wkbook = contraction_wkbook.unwrap();
+        let first_contra_sheet = contraction_wkbook.get_sheet(&0usize);
+        if first_contra_sheet.is_err() {
+            return Err(Error::Generic(format!(
+                "Contraction file contains no sheet: {}",
+                first_contra_sheet.err().unwrap()
+            )));
+        }
+        let first_contra_sheet = first_contra_sheet.unwrap();
+        let (max_col, max_row) = first_contra_sheet.get_highest_column_and_row();
+        for col_idx in 1..=max_col {
+            for row_idx in 2..=max_row {
+                let cell_text = first_contra_sheet.get_value((col_idx, row_idx));
+                if !cell_text.trim().is_empty() {
+                    contraction_str.push(cell_text.trim().into());
+                }
+            }
+        }
+        let _ = fs::remove_file(contraction_f_path).await;
+    }
+    Ok(contraction_str)
 }
 
 fn validate_sheet(
