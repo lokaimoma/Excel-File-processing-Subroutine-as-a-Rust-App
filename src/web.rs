@@ -5,8 +5,10 @@ use crate::{
         DataSource,
     },
     error::Error,
+    Result,
 };
 use axum::{
+    body::Bytes,
     extract::{Multipart, State},
     routing::post,
     Json, Router,
@@ -21,13 +23,94 @@ pub fn get_routes(datasource: SqliteDataSource) -> Router {
     Router::new()
         .route("/upload", post(upload_file))
         .route("/getHeader", post(get_header_row))
+        .route("/runJob", post(run_job))
         .with_state(datasource)
+}
+
+struct JobDetails {
+    file_id: String,
+    contraction_file: Option<Bytes>,
+    search_terms: Vec<String>,
+    check_date: bool,
+}
+
+impl JobDetails {
+    const FILE_ID_FIELD_N: &'static str = "fileId";
+    const CONTRACTION_F_FIELD_N: &'static str = "contractionFile";
+    const SEARCH_TERMS_FIELD_N: &'static str = "searchTerms";
+    const CHECK_DATE_FIELD_N: &'static str = "checkDate";
+    const SEARCH_TERM_COUNTER_LIMIT: usize = 5;
+
+    fn file_id(&self) -> &str {
+        &self.file_id
+    }
+
+    fn contraction_file(&self) -> &Option<Bytes> {
+        &self.contraction_file
+    }
+
+    fn search_terms(&self) -> &Vec<String> {
+        &self.search_terms
+    }
+
+    fn check_date(&self) -> bool {
+        self.check_date
+    }
+
+    async fn try_from(mut value: Multipart) -> Result<Self> {
+        let mut file_id: Option<String> = None;
+        let mut contraction_file: Option<Bytes> = None;
+        let mut search_terms: Vec<String> = Vec::with_capacity(5);
+        let mut check_date: bool = false;
+
+        let mut search_t_counter = 0;
+
+        while let Some(field) = value.next_field().await? {
+            let name = field.name();
+            if name.is_none() {
+                continue;
+            }
+            let name = name.unwrap();
+            match name {
+                JobDetails::FILE_ID_FIELD_N => file_id = Some(name.to_owned()),
+                JobDetails::CONTRACTION_F_FIELD_N => {
+                    let bytes = field.bytes().await?;
+                    contraction_file = Some(bytes);
+                }
+                JobDetails::SEARCH_TERMS_FIELD_N => {
+                    if search_t_counter < JobDetails::SEARCH_TERM_COUNTER_LIMIT {
+                        let text = field.text().await?;
+                        search_terms.insert(search_t_counter, text.to_owned());
+                        search_t_counter += 1;
+                    }
+                }
+                JobDetails::CHECK_DATE_FIELD_N => check_date = true,
+                _ => {}
+            }
+        }
+        if file_id.is_none() {
+            return Err(Error::MultipartFormError(
+                "fileId not present in formdata".to_string(),
+            ));
+        }
+        Ok(Self {
+            file_id: file_id.unwrap(),
+            contraction_file,
+            check_date,
+            search_terms,
+        })
+    }
+}
+
+async fn run_job(mut multipart: Multipart) -> Result<Json<Value>> {
+    let job_detail = JobDetails::try_from(multipart).await?;
+    todo!()
 }
 
 async fn get_header_row(
     State(datasource): State<SqliteDataSource>,
     Json(partial_f_entry): Json<UploadFileEntry>,
-) -> Result<Json<Value>, Error> {
+) -> Result<Json<Value>> {
     let result = match datasource.get_file_entry(partial_f_entry.id).await {
         Ok(r) => r,
         Err(e) => return Err(Error::DatabaseOperationFailed(e.to_string())),
@@ -82,11 +165,11 @@ async fn get_header_row(
 async fn upload_file(
     State(datasource): State<SqliteDataSource>,
     mut multipart: Multipart,
-) -> Result<Json<Value>, Error> {
+) -> Result<Json<Value>> {
     let result = multipart.next_field().await;
 
     if result.is_err() {
-        return Err(Error::UploadFailed(result.err().unwrap().body_text()));
+        return Err(Error::MultipartFormError(result.err().unwrap().body_text()));
     }
 
     let field = result.unwrap();

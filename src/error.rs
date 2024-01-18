@@ -8,7 +8,7 @@ use thiserror::Error;
 #[derive(Debug, Error, Clone)]
 pub enum Error {
     #[error("Error parsing multipart data: {0}")]
-    UploadFailed(String),
+    MultipartFormError(String),
     #[error("Expected a file but none was uploaded or file was corrupted")]
     NoFileUploaded,
     #[error("Error writing uploaded file {0} to disk")]
@@ -34,5 +34,13 @@ impl IntoResponse for Error {
             .header("Content-Type", "text/plain")
             .body(Body::from(format!("{self}")))
             .unwrap()
+    }
+}
+
+impl From<axum::extract::multipart::MultipartError> for Error {
+    fn from(value: axum::extract::multipart::MultipartError) -> Self {
+        Self::MultipartFormError(
+            format!("Error parsing multipart formdata: {}", value.to_string()).to_string(),
+        )
     }
 }
