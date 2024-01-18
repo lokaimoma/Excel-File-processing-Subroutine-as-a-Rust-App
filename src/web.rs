@@ -30,11 +30,22 @@ pub fn get_routes(datasource: SqliteDataSource) -> Router {
         .with_state(datasource)
 }
 
+enum SortInfo {
+    ASC { column_index: u32 },
+    DESC { column_index: u32 },
+}
+
+impl SortInfo {
+    const ASC: &'static str = "asc";
+    const DESC: &'static str = "desc";
+}
+
 struct JobDetails {
     file_id: String,
     contraction_file: Option<Bytes>,
     search_terms: Vec<String>,
     check_date_cols: Vec<u32>,
+    sort_cols_info: Vec<SortInfo>,
 }
 
 impl JobDetails {
@@ -42,7 +53,12 @@ impl JobDetails {
     const CONTRACTION_F_FIELD_N: &'static str = "contractionFile";
     const SEARCH_TERMS_FIELD_N: &'static str = "searchTerms";
     const CHECK_DATE_FIELD_N: &'static str = "checkDate";
+    const SORT_COL_FIELD_N: &'static str = "sortCol";
     const SEARCH_TERM_COUNTER_LIMIT: usize = 5;
+
+    fn sort_infos(&self) -> &Vec<SortInfo> {
+        &self.sort_cols_info
+    }
 
     fn file_id(&self) -> &str {
         &self.file_id
@@ -65,6 +81,7 @@ impl JobDetails {
         let mut contraction_file: Option<Bytes> = None;
         let mut search_terms: Vec<String> = Vec::with_capacity(5);
         let mut check_date_cols: Vec<u32> = Vec::new();
+        let mut sor_infos: Vec<SortInfo> = Vec::new();
 
         let mut search_t_counter = 0;
 
@@ -73,6 +90,7 @@ impl JobDetails {
             if name.is_none() {
                 continue;
             }
+
             let name = name.unwrap();
             match name {
                 JobDetails::FILE_ID_FIELD_N => file_id = Some(name.to_owned()),
@@ -96,6 +114,46 @@ impl JobDetails {
                     }
                     check_date_cols.push(number.unwrap());
                 }
+                JobDetails::SORT_COL_FIELD_N => {
+                    // payload has to be of format ORDER,index
+                    // order can be asc / desc (lowercase)
+                    let text = field.text().await?;
+                    let text = text.trim();
+                    let text_parts: Vec<&str> = text.split(",").collect();
+                    if text_parts.len() < 2 {
+                        return Err(Error::Generic(format!("sortCol data has to be of form order,index Where order can take as value either asc or desc. Got: {}", text)));
+                    }
+                    let order = text_parts[0];
+                    let order = order.to_lowercase();
+                    let sort_info: SortInfo;
+                    let index = text_parts[1];
+                    let index_val = index.parse::<u32>();
+                    if index_val.is_err() {
+                        return Err(Error::Generic(format!(
+                            "Invalid value passed as column index. Got {}, expected a valid number",
+                            index
+                        )));
+                    }
+                    match order.as_str() {
+                        SortInfo::ASC => {
+                            sort_info = SortInfo::ASC {
+                                column_index: index_val.unwrap(),
+                            }
+                        }
+                        SortInfo::DESC => {
+                            sort_info = SortInfo::DESC {
+                                column_index: index_val.unwrap(),
+                            }
+                        }
+                        _ => {
+                            return Err(Error::Generic(format!(
+                                "Invalid sort order value: Got {}, Expected: asc / desc",
+                                order
+                            )));
+                        }
+                    }
+                    sor_infos.push(sort_info);
+                }
                 _ => {}
             }
         }
@@ -109,6 +167,7 @@ impl JobDetails {
             contraction_file,
             check_date_cols,
             search_terms,
+            sort_cols_info: sor_infos,
         })
     }
 }
