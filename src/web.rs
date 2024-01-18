@@ -33,6 +33,14 @@ async fn run_job(
     State(datasource): State<SqliteDataSource>,
     multipart: Multipart,
 ) -> Result<Json<Value>> {
+    const FIRST_SEARCH_HTML_TEXT: &str = r##"{before}<font color="red">{value}</font>{after}"##;
+    const SECOND_SEARCH_HTML_TEXT: &str =
+        r##"{before}<font color="#ADD8E6">{value}</font>{after}"##;
+    const THIRD_SEARCH_HTML_TEXT: &str = r##"{before}<font color="#90EE90">{value}</font>{after}"##;
+    const FOURTH_SEARCH_HTML_TEXT: &str =
+        r##"{before}<font color="#A020F0">{value}</font>{after}"##;
+    const FIFTH_SEARCH_HTML_TEXT: &str = r##"{before}<font color="#FFC0CB">{value}</font>{after}"##;
+
     let job_detail = JobDetails::try_from(multipart).await?;
     let main_file = datasource
         .get_file_entry(job_detail.file_id().to_owned())
@@ -59,6 +67,24 @@ async fn run_job(
         &job_detail,
         last_row_idx,
     )?;
+
+    let mut contraction_f_path = PathBuf::from(DATA_DIR);
+    let contraction_f_name = format!("contraction_{}.xlsx", uuid::Uuid::now_v7());
+    contraction_f_path.push(contraction_f_name);
+
+    if job_detail.contraction_file().is_some() {
+        if let Err(e) = fs::write(
+            &contraction_f_path,
+            job_detail.contraction_file().as_ref().unwrap().as_ref(),
+        )
+        .await
+        {
+            return Err(Error::IOError(format!(
+                "Error writing contraction file to disk, {}",
+                e.to_string()
+            )));
+        };
+    }
 
     todo!()
 }
