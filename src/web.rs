@@ -254,6 +254,9 @@ fn highlight_search_terms_and_contractions(
                     ),
                 );
             }
+            cell.set_rich_text(
+                umya_spreadsheet::helper::html::html_to_richtext(&cell_text).unwrap(),
+            );
         }
     }
 
