@@ -16,6 +16,7 @@ pub struct RowsPayload {
     pub rows: Vec<String>,
 }
 
+#[derive(Debug)]
 pub enum SortInfo {
     ASC { column_index: u32 },
     DESC { column_index: u32 },
@@ -26,6 +27,7 @@ impl SortInfo {
     const DESC: &'static str = "desc";
 }
 
+#[derive(Debug)]
 pub struct JobDetails {
     file_id: String,
     contraction_file: Option<Bytes>,
@@ -79,7 +81,7 @@ impl JobDetails {
 
             let name = name.unwrap();
             match name {
-                JobDetails::FILE_ID_FIELD_N => file_id = Some(name.to_owned()),
+                JobDetails::FILE_ID_FIELD_N => file_id = Some(field.text().await?),
                 JobDetails::CONTRACTION_F_FIELD_N => {
                     let bytes = field.bytes().await?;
                     contraction_file = Some(bytes);

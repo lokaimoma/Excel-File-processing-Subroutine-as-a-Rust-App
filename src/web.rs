@@ -42,6 +42,7 @@ async fn run_job(
     multipart: Multipart,
 ) -> impl IntoResponse {
     let job_detail = JobDetails::try_from(multipart).await?;
+    event!(Level::DEBUG, "Job details: {:?}", job_detail);
     let spreadsheet = datasource
         .get_file_entry(job_detail.file_id().to_owned())
         .await?;
