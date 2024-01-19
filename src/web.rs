@@ -7,6 +7,7 @@ use crate::{
     error::Error,
     Result,
 };
+use aho_corasick::AhoCorasick;
 use axum::{
     extract::{Multipart, State},
     routing::post,
@@ -20,6 +21,7 @@ use std::{
     path::PathBuf,
 };
 use tokio::fs;
+use tracing::{event, instrument, Level};
 use umya_spreadsheet::reader;
 
 const DATA_DIR: &str = ".\\data";
@@ -32,6 +34,7 @@ pub fn get_routes(datasource: SqliteDataSource) -> Router {
         .with_state(datasource)
 }
 
+#[instrument]
 async fn run_job(
     State(datasource): State<SqliteDataSource>,
     multipart: Multipart,
@@ -80,7 +83,7 @@ async fn run_job(
     todo!()
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct FoundSubTextPosInfo {
     start_idx: usize,
     end_idx: usize,
@@ -99,19 +102,47 @@ fn get_contracted_data(
         for row_idx in 2..=last_row_idx {
             let cell = work_sheet.get_cell_mut((col_idx, row_idx));
             let cell_text = cell.get_value();
-            ;; aho_corsick
-            let mut search_findings: Vec<FoundSubTextPosInfo> = Vec::new();
-            for (idx, term) in search_terms.iter().enumerate() {
-                if cell_text.contains(term) {
-                    let start_idx = cell_text.find(term).unwrap();
-                    let end_idx = term.len() - 1;
-                    search_findings.push(FoundSubTextPosInfo {
-                        start_idx,
-                        end_idx,
-                        index_in_search_vec: idx,
-                    });
-                }
-            }
+
+            //  aho_corsick
+            let ac = AhoCorasick::new(search_terms).unwrap();
+            event!(
+                Level::TRACE,
+                message = "Searching cell value for search patterns",
+                cell_value = cell_text.as_ref(),
+                search_patterns = format!("{:?}", search_terms)
+            );
+            let search_findings: Vec<FoundSubTextPosInfo> = ac
+                .find_overlapping_iter(cell_text.as_ref())
+                .map(|finding| FoundSubTextPosInfo {
+                    start_idx: finding.start(),
+                    end_idx: finding.end() - 1,
+                    index_in_search_vec: finding.pattern().as_usize(),
+                })
+                .collect();
+            event!(
+                Level::DEBUG,
+                message = "Done searching",
+                findings = format!("{:?}", search_findings)
+            );
+
+            // let mut search_findings: Vec<FoundSubTextPosInfo> = Vec::new();
+            // for (idx, term) in search_terms.iter().enumerate() {
+            //     if cell_text.contains(term) {
+            //         let start_idx = cell_text.find(term).unwrap();
+            //         let end_idx = term.len() - 1;
+            //         search_findings.push(FoundSubTextPosInfo {
+            //             start_idx,
+            //             end_idx,
+            //             index_in_search_vec: idx,
+            //         });
+            //     }
+            // }
+            // finding overlapping
+
+            event!(
+                Level::TRACE,
+                "Searching for overlaps in search findings, and recalculating their start and end"
+            );
             let new_search_findings = Vec::clone(&search_findings);
             for i in 0..search_findings.len() {
                 let f1 = search_findings[i];
@@ -131,17 +162,33 @@ fn get_contracted_data(
                         }
                     }
                 }
+                event!(
+                    Level::DEBUG,
+                    message = format!("Iter {}", i),
+                    new_search_findings = format!("{:?}", new_search_findings)
+                );
             }
+            event!(Level::TRACE, "Removing findings with start and end = 0");
             let new_search_findings: Vec<FoundSubTextPosInfo> = new_search_findings
                 .into_iter()
                 .filter(|finding| finding.start_idx != 0 && finding.end_idx != 0)
                 .collect();
+            event!(
+                Level::DEBUG,
+                message = "Final findings",
+                findings = format!("{:?}", new_search_findings)
+            );
 
-            const SEARCH_HTML_REPLACEMENT_TEXT: &str =
-                r##"{before}<font color="{txtcolor}">{value}</font>{after}"##;
-
-            for term in new_search_findings {
-                let splits: Vec<String>;
+            let mut cell_text = cell_text.to_string();
+            for finding in new_search_findings {
+                cell_text.replace_range(
+                    finding.start_idx..=finding.end_idx,
+                    &format!(
+                        r##"<font color="{txtcolor}">{value}</font>"##,
+                        txtcolor = "RED",
+                        value = search_terms[finding.index_in_search_vec]
+                    ),
+                );
             }
         }
     }

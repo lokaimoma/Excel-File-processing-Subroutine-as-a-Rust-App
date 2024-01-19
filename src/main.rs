@@ -22,5 +22,8 @@ async fn main() {
     // for i in 1..0 {
     // println!("{}", i);
     // }
-    println!("{}", (1..=3).contains(&3));
+    // println!("{}", (1..=3).contains(&3));
+    let mut a = String::from("hello");
+    a.replace_range(1..=1, "k");
+    println!("{}", a);
 }

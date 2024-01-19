@@ -10,7 +10,7 @@ use rusqlite::Connection;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SqliteDataSource(Arc<Mutex<Connection>>);
 
 impl SqliteDataSource {
