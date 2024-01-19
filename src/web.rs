@@ -1,4 +1,5 @@
 use crate::{
+    colors::{self, CellColorProfile},
     data::{
         model::{JobDetails, RowsPayload, UploadFileEntry},
         sqlite_ds::SqliteDataSource,
@@ -9,20 +10,21 @@ use crate::{
 };
 use aho_corasick::AhoCorasick;
 use axum::{
+    body,
     extract::{Multipart, State},
+    http::header::{CONTENT_DISPOSITION, CONTENT_TYPE},
+    response::{AppendHeaders, IntoResponse},
     routing::post,
     Json, Router,
 };
 use calamine::{open_workbook_auto, DataType, Reader};
 use serde_json::json;
 use serde_json::Value;
-use std::{
-    ops::{Range, RangeInclusive},
-    path::PathBuf,
-};
+use std::path::PathBuf;
 use tokio::fs;
+use tokio_util::io::ReaderStream;
 use tracing::{event, instrument, Level};
-use umya_spreadsheet::reader;
+use umya_spreadsheet::{reader, writer};
 
 const DATA_DIR: &str = ".\\data";
 
@@ -38,49 +40,83 @@ pub fn get_routes(datasource: SqliteDataSource) -> Router {
 async fn run_job(
     State(datasource): State<SqliteDataSource>,
     multipart: Multipart,
-) -> Result<Json<Value>> {
+) -> impl IntoResponse {
     let job_detail = JobDetails::try_from(multipart).await?;
-    let main_file = datasource
+    let spreadsheet = datasource
         .get_file_entry(job_detail.file_id().to_owned())
         .await?;
-    let main_file = reader::xlsx::read(main_file.file_path);
-    if main_file.is_err() {
-        return Err(Error::IOError(main_file.err().unwrap().to_string()));
+    let spreadsheet = reader::xlsx::read(spreadsheet.file_path);
+    if spreadsheet.is_err() {
+        return Err(Error::IOError(spreadsheet.err().unwrap().to_string()));
     }
-    let mut spreedsheet = main_file.unwrap();
-    let first_sheet = spreedsheet.get_sheet_mut(&0usize);
-    if first_sheet.is_err() {
-        return Err(Error::InValidExcelFile(first_sheet.err().unwrap().into()));
+    let mut spreadsheet = spreadsheet.unwrap();
+    let worksheet = spreadsheet.get_sheet_mut(&0usize);
+    if worksheet.is_err() {
+        return Err(Error::InValidExcelFile(worksheet.err().unwrap().into()));
     }
-    let first_sheet = first_sheet.unwrap();
+    let worksheet = worksheet.unwrap();
 
     let (first_col_idx, first_row_idx) = (1, 1);
-    let (last_col_idx, last_row_idx) = first_sheet.get_highest_column_and_row();
+    let (last_col_idx, last_row_idx) = worksheet.get_highest_column_and_row();
 
+    event!(Level::TRACE, "Validating sheet");
     validate_sheet(
         first_col_idx,
         last_col_idx,
-        first_sheet,
+        worksheet,
         first_row_idx,
         &job_detail,
         last_row_idx,
     )?;
+    event!(Level::TRACE, "Sheet is valid");
 
     let mut contraction_f_path = PathBuf::from(DATA_DIR);
     let contraction_f_name = format!("contraction_{}.xlsx", uuid::Uuid::now_v7());
     contraction_f_path.push(contraction_f_name);
     let contraction_str: Vec<String> =
-        get_contraction_texts(&job_detail, contraction_f_path).await?;
+        get_contraction_texts(&job_detail, &contraction_f_path).await?;
 
-    let final_file_path = get_contracted_data(
+    event!(Level::TRACE, "Highlighting search terms and contractions");
+    highlight_search_terms_and_contractions(
         last_col_idx,
         last_row_idx,
-        first_sheet,
+        worksheet,
         &job_detail,
         &contraction_str,
     )?;
+    event!(
+        Level::TRACE,
+        "Done highlighting search terms and contractions"
+    );
 
-    todo!()
+    let final_f_name = format!("contraction_{}.xlsx", uuid::Uuid::now_v7());
+    contraction_f_path.pop();
+    contraction_f_path.push(final_f_name);
+
+    event!(Level::TRACE, "Saving final contraction file....");
+
+    if let Err(e) = writer::xlsx::write(&spreadsheet, &contraction_f_path) {
+        event!(
+            Level::ERROR,
+            message = "Error writing contraction file",
+            error = e.to_string()
+        );
+        return Err(Error::IOError(e.to_string()));
+    };
+    event!(Level::TRACE, "File saved successfully");
+
+    let file = fs::File::open(contraction_f_path).await.unwrap();
+    let stream = ReaderStream::new(file);
+    let stream = body::Body::from_stream(stream);
+    let headers = AppendHeaders([
+        (
+            CONTENT_TYPE,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ),
+        (CONTENT_DISPOSITION, "attachment"),
+    ]);
+
+    Ok((headers, stream))
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -90,13 +126,29 @@ struct FoundSubTextPosInfo {
     index_in_search_vec: usize,
 }
 
-fn get_contracted_data(
+fn highlight_search_terms_and_contractions(
     last_col_idx: u32,
     last_row_idx: u32,
     work_sheet: &mut umya_spreadsheet::Worksheet,
     job_detail: &JobDetails,
     contraction_str: &[String],
-) -> Result<PathBuf> {
+) -> Result<()> {
+    let default_color: colors::White = colors::White { color_pool_pos: 0 };
+    let black: colors::Black = colors::Black { color_pool_pos: 0 };
+    let yellow: colors::Yellow = colors::Yellow { color_pool_pos: 0 };
+    let beige: colors::Beige = colors::Beige { color_pool_pos: 0 };
+    let lavender: colors::Lavender = colors::Lavender { color_pool_pos: 0 };
+    let navy_blue: colors::NavyBlue = colors::NavyBlue { color_pool_pos: 0 };
+
+    let mut color_profiles: [Box<dyn CellColorProfile>; 6] = [
+        Box::from(default_color),
+        Box::from(yellow),
+        Box::from(beige),
+        Box::from(lavender),
+        Box::from(navy_blue),
+        Box::from(black),
+    ];
+
     let search_terms = job_detail.search_terms();
     for col_idx in 1..=last_col_idx {
         for row_idx in 2..=last_row_idx {
@@ -124,20 +176,6 @@ fn get_contracted_data(
                 message = "Done searching",
                 findings = format!("{:?}", search_findings)
             );
-
-            // let mut search_findings: Vec<FoundSubTextPosInfo> = Vec::new();
-            // for (idx, term) in search_terms.iter().enumerate() {
-            //     if cell_text.contains(term) {
-            //         let start_idx = cell_text.find(term).unwrap();
-            //         let end_idx = term.len() - 1;
-            //         search_findings.push(FoundSubTextPosInfo {
-            //             start_idx,
-            //             end_idx,
-            //             index_in_search_vec: idx,
-            //         });
-            //     }
-            // }
-            // finding overlapping
 
             event!(
                 Level::TRACE,
@@ -179,25 +217,41 @@ fn get_contracted_data(
                 findings = format!("{:?}", new_search_findings)
             );
 
+            let mut color_profile: &mut Box<dyn CellColorProfile> = &mut color_profiles[0];
+            for (idx, contraction) in contraction_str.iter().enumerate() {
+                if cell_text.contains(contraction) {
+                    color_profile = &mut color_profiles[idx + 1 % color_profiles.len()];
+                    break;
+                }
+            }
             let mut cell_text = cell_text.to_string();
+            let cell_style = cell.get_style_mut();
+            cell_style.set_background_color(colors::to_argb(
+                &color_profile.as_ref().get_background_color(),
+            ));
+            let font = cell_style.get_font_mut();
+            font.get_color_mut().set_argb(&colors::to_argb(
+                &color_profile.as_ref().get_default_text_color(),
+            ));
             for finding in new_search_findings {
                 cell_text.replace_range(
                     finding.start_idx..=finding.end_idx,
                     &format!(
                         r##"<font color="{txtcolor}">{value}</font>"##,
-                        txtcolor = "RED",
+                        txtcolor = color_profile.get_color(),
                         value = search_terms[finding.index_in_search_vec]
                     ),
                 );
             }
         }
     }
-    todo!()
+
+    Ok(())
 }
 
 async fn get_contraction_texts(
     job_detail: &JobDetails,
-    contraction_f_path: PathBuf,
+    contraction_f_path: &PathBuf,
 ) -> Result<Vec<String>> {
     let mut contraction_str: Vec<String> = Vec::new();
     if job_detail.contraction_file().is_some() {

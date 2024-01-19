@@ -1,0 +1,47 @@
+Black Bg - dark (black)
+----------------------
+Red > Red
+#A020F0 > #DDB4F9 (Purple)
+#00FFFF > #00FFFF (Cyan)
+#90EE90 > #90EE90 (Green)
+#A9A9A9 > #A9A9A9 (Grey)
+
+White Bg - light (black)
+-----------------------
+Red > #AD0000
+#A020F0 >  #780DBA
+#00FFFF > #006161
+#90EE90 > #0F610F
+#A9A9A9 > #474747
+
+Navy blue Bg (#000080) - dark color (def tc white)
+-----------------------
+Red > Red
+#A020F0 > #D49BF8
+#00FFFF > #00FFFF
+#90EE90 > #90EE90
+#A9A9A9 > #B0B0B0
+
+Yellow (#ffff00) - light (Def tc black)
+----------------
+Red > #AD0000
+#A020F0 > #780DBA
+#00FFFF > #006161
+#90EE90 > #0F610F
+#A9A9A9 > #474747
+
+Beige (#F5F5DC) - light (Default text color black)
+------------------------
+Red > #AD0000
+#A020F0 > #780DBA
+#00FFFF > #006161
+#90EE90 > #0F610F
+#A9A9A9 > #474747
+
+Lavender (#E6E6FA) - light (Default text color black)
+------------------------
+Red > #AD0000
+#A020F0 > #780DBA
+#00FFFF > #006161
+#90EE90 > #0F610F
+#A9A9A9 > #474747

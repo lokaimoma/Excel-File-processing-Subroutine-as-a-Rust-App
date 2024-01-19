@@ -4,6 +4,7 @@ use data::{sqlite_ds::SqliteDataSource, DataSource};
 use rusqlite::Connection;
 use tower_http::trace::TraceLayer;
 
+mod colors;
 mod data;
 pub mod error;
 mod web;
