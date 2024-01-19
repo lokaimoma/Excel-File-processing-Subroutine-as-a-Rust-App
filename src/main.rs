@@ -1,5 +1,4 @@
 use std::path::MAIN_SEPARATOR;
-use umya_spreadsheet::reader;
 
 #[tokio::main]
 async fn main() {
@@ -16,6 +15,7 @@ async fn main() {
         .await
         .unwrap();
     axum::serve(listener, app).await.unwrap();
+
     // let file = reader::xlsx::read(r#".\data\0329 giao hang.xlsx"#).unwrap();
     // let sheet = file.get_sheet(&0usize).unwrap();
     // let a = sheet.get_cell_collection()[0];
@@ -33,4 +33,13 @@ async fn main() {
     // let mut a = String::from("hello");
     // a.replace_range(1..=1, "k");
     // println!("{}", a);
+    // let html_string = format!(
+    // r##"<font color="{clr}">{txt}</font><font color="#ff0000">Another text</font>"##,
+    // clr = "#000000",
+    // txt = "The text"
+    // );
+    // println!(
+    // "{:?}",
+    // umya_spreadsheet::helper::html::html_to_richtext(&html_string).unwrap()
+    // );
 }

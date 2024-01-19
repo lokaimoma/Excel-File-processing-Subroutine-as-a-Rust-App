@@ -164,7 +164,7 @@ fn highlight_search_terms_and_contractions(
                 cell_value = cell_text.as_ref(),
                 search_patterns = format!("{:?}", search_terms)
             );
-            let search_findings: Vec<FoundSubTextPosInfo> = ac
+            let mut search_findings: Vec<FoundSubTextPosInfo> = ac
                 .find_overlapping_iter(cell_text.as_ref())
                 .map(|finding| FoundSubTextPosInfo {
                     start_idx: finding.start(),
@@ -172,6 +172,9 @@ fn highlight_search_terms_and_contractions(
                     index_in_search_vec: finding.pattern().as_usize(),
                 })
                 .collect();
+
+            search_findings.sort_by(|f1, f2| f1.start_idx.partial_cmp(&f2.start_idx).unwrap());
+
             event!(
                 Level::DEBUG,
                 message = "Done searching",
@@ -182,23 +185,49 @@ fn highlight_search_terms_and_contractions(
                 Level::TRACE,
                 "Searching for overlaps in search findings, and recalculating their start and end"
             );
-            let new_search_findings = Vec::clone(&search_findings);
+            let mut new_search_findings = Vec::clone(&search_findings);
             for i in 0..search_findings.len() {
                 let f1 = search_findings[i];
+                event!(Level::TRACE, "At index i={}; Finding = {:?}", i, f1);
                 for j in i + 1..search_findings.len() {
                     let f2 = search_findings[j];
-                    let mut new_f2 = new_search_findings[j];
+                    let new_f2 = &mut new_search_findings[j];
+                    event!(
+                        Level::TRACE,
+                        "Checking index j={}; Finding = {:?}; New Finding = {:?}",
+                        j,
+                        f2,
+                        new_f2
+                    );
                     let range = f1.start_idx..=f1.end_idx;
+                    event!(Level::TRACE, "Range of of f1: {:?}", range);
                     if range.contains(&f2.start_idx) {
+                        event!(Level::TRACE, "Start of f2 in f1");
                         if range.contains(&f2.end_idx) {
+                            event!(Level::TRACE, "End of f2 in f1");
                             new_f2.end_idx = 0;
                             new_f2.start_idx = 0;
+                            event!(
+                                Level::TRACE,
+                                "Final findings f2={:?}; new_f2={:?}",
+                                f2,
+                                new_f2
+                            );
                             continue;
                         }
+                        event!(Level::TRACE, "end of f2 out of f1 range");
                         let new_start = f1.end_idx + 1;
-                        if new_start > new_f2.start_idx {
+                        if new_start > new_f2.start_idx && new_start < new_f2.end_idx {
                             new_f2.start_idx = new_start;
+                        } else {
+                            new_f2.start_idx = new_f2.end_idx
                         }
+                        event!(
+                            Level::TRACE,
+                            "Final findings f2={:?}; new_f2={:?}",
+                            f2,
+                            new_f2
+                        );
                     }
                 }
                 event!(
@@ -232,9 +261,8 @@ fn highlight_search_terms_and_contractions(
                     break;
                 }
             }
-            let mut cell_text = cell_text.to_string();
             let cell_style = cell.get_style_mut();
-
+            let mut cell_text = cell.get_value().to_string();
             event!(Level::TRACE, "Current color profile: {:?}", color_profile);
 
             // cell_style.set_background_color(colors::to_argb(
@@ -244,19 +272,34 @@ fn highlight_search_terms_and_contractions(
             // font.get_color_mut().set_argb(&colors::to_argb(
             // &color_profile.as_ref().get_default_text_color(),
             // ));
-            for finding in new_search_findings {
+            let mut offset = 0;
+            event!(Level::TRACE, "Formating text using finds");
+            for mut finding in new_search_findings {
+                // Adding the html font tags,etc changes the position of the texts
+                // we would have to update the position of the findings.
+                // luckily they're in ascending order so we just add offset
+                finding.start_idx += offset;
+                finding.end_idx += offset;
                 cell_text.replace_range(
                     finding.start_idx..=finding.end_idx,
                     &format!(
                         r##"<font color="{txtcolor}">{value}</font>"##,
                         txtcolor = color_profile.get_color(),
-                        value = search_terms[finding.index_in_search_vec]
+                        value = &cell_text[finding.start_idx..=finding.end_idx]
                     ),
                 );
+                // why 29, the new characters added to the old text sum up to 28
+                // 22 = html instructions (including the quote surrounding the color hex), color hex = 7
+                // The text value is not part, because they've been accounted for already
+                offset += 29;
+                event!(Level::DEBUG, "New Text: {}", cell_text);
+                event!(Level::TRACE, "New offset: {}", offset);
             }
+            event!(Level::TRACE, "Setting rich text");
             cell.set_rich_text(
                 umya_spreadsheet::helper::html::html_to_richtext(&cell_text).unwrap(),
             );
+            color_profile.reset_color_pool_pos();
         }
     }
 

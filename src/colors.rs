@@ -17,6 +17,7 @@ pub trait CellColorProfile: Debug {
     fn get_background_color(&self) -> String;
     /// Return other text colors that look good on the default background
     fn get_color(&mut self) -> String;
+    fn reset_color_pool_pos(&mut self);
 }
 
 #[derive(Debug)]
@@ -40,6 +41,10 @@ impl CellColorProfile for White {
         let res = LIGHT_COLOR_POOL[self.color_pool_pos].into();
         self.color_pool_pos += 1;
         res
+    }
+
+    fn reset_color_pool_pos(&mut self) {
+        self.color_pool_pos = 0;
     }
 }
 
@@ -65,6 +70,10 @@ impl CellColorProfile for Yellow {
         self.color_pool_pos += 1;
         res
     }
+
+    fn reset_color_pool_pos(&mut self) {
+        self.color_pool_pos = 0;
+    }
 }
 
 #[derive(Debug)]
@@ -88,6 +97,10 @@ impl CellColorProfile for Beige {
         let res = LIGHT_COLOR_POOL[self.color_pool_pos].into();
         self.color_pool_pos += 1;
         res
+    }
+
+    fn reset_color_pool_pos(&mut self) {
+        self.color_pool_pos = 0;
     }
 }
 
@@ -113,6 +126,10 @@ impl CellColorProfile for Lavender {
         self.color_pool_pos += 1;
         res
     }
+
+    fn reset_color_pool_pos(&mut self) {
+        self.color_pool_pos = 0;
+    }
 }
 
 #[derive(Debug)]
@@ -137,6 +154,10 @@ impl CellColorProfile for Black {
         self.color_pool_pos += 1;
         res
     }
+
+    fn reset_color_pool_pos(&mut self) {
+        self.color_pool_pos = 0;
+    }
 }
 
 #[derive(Debug)]
@@ -160,5 +181,9 @@ impl CellColorProfile for NavyBlue {
         let res = DARK_COLOR_POOL[self.color_pool_pos].into();
         self.color_pool_pos += 1;
         res
+    }
+
+    fn reset_color_pool_pos(&mut self) {
+        self.color_pool_pos = 0;
     }
 }
