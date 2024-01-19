@@ -210,7 +210,7 @@ fn highlight_search_terms_and_contractions(
             event!(Level::TRACE, "Removing findings with start and end = 0");
             let new_search_findings: Vec<FoundSubTextPosInfo> = new_search_findings
                 .into_iter()
-                .filter(|finding| finding.start_idx != 0 && finding.end_idx != 0)
+                .filter(|finding| finding.start_idx != 0 || finding.end_idx != 0)
                 .collect();
             event!(
                 Level::DEBUG,
@@ -221,19 +221,29 @@ fn highlight_search_terms_and_contractions(
             let mut color_profile: &mut Box<dyn CellColorProfile> = &mut color_profiles[0];
             for (idx, contraction) in contraction_str.iter().enumerate() {
                 if cell_text.contains(contraction) {
-                    color_profile = &mut color_profiles[idx + 1 % color_profiles.len()];
+                    let color_idx = idx + 1 % color_profiles.len();
+                    event!(
+                        Level::DEBUG,
+                        "Contraction found for cell value={}, choosing color at idx={}",
+                        cell_text.as_ref(),
+                        color_idx
+                    );
+                    color_profile = &mut color_profiles[color_idx];
                     break;
                 }
             }
             let mut cell_text = cell_text.to_string();
             let cell_style = cell.get_style_mut();
-            cell_style.set_background_color(colors::to_argb(
-                &color_profile.as_ref().get_background_color(),
-            ));
-            let font = cell_style.get_font_mut();
-            font.get_color_mut().set_argb(&colors::to_argb(
-                &color_profile.as_ref().get_default_text_color(),
-            ));
+
+            event!(Level::TRACE, "Current color profile: {:?}", color_profile);
+
+            // cell_style.set_background_color(colors::to_argb(
+            // &color_profile.as_ref().get_background_color(),
+            // ));
+            // let font = cell_style.get_font_mut();
+            // font.get_color_mut().set_argb(&colors::to_argb(
+            // &color_profile.as_ref().get_default_text_color(),
+            // ));
             for finding in new_search_findings {
                 cell_text.replace_range(
                     finding.start_idx..=finding.end_idx,

@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 // Color Pool => [Red, Purple, Cyan, Green, Gray]
 const DARK_COLOR_POOL: [&'static str; 5] = ["#ff0000", "#D49BF8", "#00FFFF", "#90EE90", "#B0B0B0"];
 const LIGHT_COLOR_POOL: [&'static str; 5] = ["#AD0000", "#780DBA", "#006161", "#0F610F", "#474747"];
@@ -8,7 +10,7 @@ pub fn to_argb(color: &String) -> String {
     color.replace("#", "FF")
 }
 
-pub trait CellColorProfile {
+pub trait CellColorProfile: Debug {
     /// Default text color that looks good on the default background color
     fn get_default_text_color(&self) -> String;
     /// Default background color
@@ -17,6 +19,7 @@ pub trait CellColorProfile {
     fn get_color(&mut self) -> String;
 }
 
+#[derive(Debug)]
 pub struct White {
     pub color_pool_pos: usize,
 }
@@ -40,6 +43,7 @@ impl CellColorProfile for White {
     }
 }
 
+#[derive(Debug)]
 pub struct Yellow {
     pub color_pool_pos: usize,
 }
@@ -63,6 +67,7 @@ impl CellColorProfile for Yellow {
     }
 }
 
+#[derive(Debug)]
 pub struct Beige {
     pub color_pool_pos: usize,
 }
@@ -86,6 +91,7 @@ impl CellColorProfile for Beige {
     }
 }
 
+#[derive(Debug)]
 pub struct Lavender {
     pub color_pool_pos: usize,
 }
@@ -109,6 +115,7 @@ impl CellColorProfile for Lavender {
     }
 }
 
+#[derive(Debug)]
 pub struct Black {
     pub color_pool_pos: usize,
 }
@@ -132,6 +139,7 @@ impl CellColorProfile for Black {
     }
 }
 
+#[derive(Debug)]
 pub struct NavyBlue {
     pub color_pool_pos: usize,
 }

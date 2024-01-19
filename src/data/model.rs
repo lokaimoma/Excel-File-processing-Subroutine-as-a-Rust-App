@@ -39,7 +39,7 @@ pub struct JobDetails {
 impl JobDetails {
     const FILE_ID_FIELD_N: &'static str = "fileId";
     const CONTRACTION_F_FIELD_N: &'static str = "contractionFile";
-    const SEARCH_TERMS_FIELD_N: &'static str = "searchTerms";
+    const SEARCH_TERMS_FIELD_N: &'static str = "searchTerm";
     const CHECK_DATE_FIELD_N: &'static str = "checkDate";
     const SORT_COL_FIELD_N: &'static str = "sortCol";
     const SEARCH_TERM_COUNTER_LIMIT: usize = 5;
