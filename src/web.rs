@@ -15,7 +15,10 @@ use axum::{
 use calamine::{open_workbook_auto, DataType, Reader};
 use serde_json::json;
 use serde_json::Value;
-use std::path::PathBuf;
+use std::{
+    ops::{Range, RangeInclusive},
+    path::PathBuf,
+};
 use tokio::fs;
 use umya_spreadsheet::reader;
 
@@ -33,9 +36,6 @@ async fn run_job(
     State(datasource): State<SqliteDataSource>,
     multipart: Multipart,
 ) -> Result<Json<Value>> {
-    const SEARCH_HTML_REPLACEMENT_TEXT: &str =
-        r##"{before}<font color="{txtcolor}" bgcolor="{bgcolor}">{value}</font>{after}"##;
-
     let job_detail = JobDetails::try_from(multipart).await?;
     let main_file = datasource
         .get_file_entry(job_detail.file_id().to_owned())
@@ -44,8 +44,8 @@ async fn run_job(
     if main_file.is_err() {
         return Err(Error::IOError(main_file.err().unwrap().to_string()));
     }
-    let spreedsheet = main_file.unwrap();
-    let first_sheet = spreedsheet.get_sheet(&0usize);
+    let mut spreedsheet = main_file.unwrap();
+    let first_sheet = spreedsheet.get_sheet_mut(&0usize);
     if first_sheet.is_err() {
         return Err(Error::InValidExcelFile(first_sheet.err().unwrap().into()));
     }
@@ -67,13 +67,89 @@ async fn run_job(
     let contraction_f_name = format!("contraction_{}.xlsx", uuid::Uuid::now_v7());
     contraction_f_path.push(contraction_f_name);
     let contraction_str: Vec<String> =
-        get_contraction_texts(job_detail, contraction_f_path).await?;
+        get_contraction_texts(&job_detail, contraction_f_path).await?;
+
+    let final_file_path = get_contracted_data(
+        last_col_idx,
+        last_row_idx,
+        first_sheet,
+        &job_detail,
+        &contraction_str,
+    )?;
 
     todo!()
 }
 
+#[derive(Clone, Copy)]
+struct FoundSubTextPosInfo {
+    start_idx: usize,
+    end_idx: usize,
+    index_in_search_vec: usize,
+}
+
+fn get_contracted_data(
+    last_col_idx: u32,
+    last_row_idx: u32,
+    work_sheet: &mut umya_spreadsheet::Worksheet,
+    job_detail: &JobDetails,
+    contraction_str: &[String],
+) -> Result<PathBuf> {
+    let search_terms = job_detail.search_terms();
+    for col_idx in 1..=last_col_idx {
+        for row_idx in 2..=last_row_idx {
+            let cell = work_sheet.get_cell_mut((col_idx, row_idx));
+            let cell_text = cell.get_value();
+            ;; aho_corsick
+            let mut search_findings: Vec<FoundSubTextPosInfo> = Vec::new();
+            for (idx, term) in search_terms.iter().enumerate() {
+                if cell_text.contains(term) {
+                    let start_idx = cell_text.find(term).unwrap();
+                    let end_idx = term.len() - 1;
+                    search_findings.push(FoundSubTextPosInfo {
+                        start_idx,
+                        end_idx,
+                        index_in_search_vec: idx,
+                    });
+                }
+            }
+            let new_search_findings = Vec::clone(&search_findings);
+            for i in 0..search_findings.len() {
+                let f1 = search_findings[i];
+                for j in i + 1..search_findings.len() {
+                    let f2 = search_findings[j];
+                    let mut new_f2 = new_search_findings[j];
+                    let range = f1.start_idx..=f1.end_idx;
+                    if range.contains(&f2.start_idx) {
+                        if range.contains(&f2.end_idx) {
+                            new_f2.end_idx = 0;
+                            new_f2.start_idx = 0;
+                            continue;
+                        }
+                        let new_start = f1.end_idx + 1;
+                        if new_start > new_f2.start_idx {
+                            new_f2.start_idx = new_start;
+                        }
+                    }
+                }
+            }
+            let new_search_findings: Vec<FoundSubTextPosInfo> = new_search_findings
+                .into_iter()
+                .filter(|finding| finding.start_idx != 0 && finding.end_idx != 0)
+                .collect();
+
+            const SEARCH_HTML_REPLACEMENT_TEXT: &str =
+                r##"{before}<font color="{txtcolor}">{value}</font>{after}"##;
+
+            for term in new_search_findings {
+                let splits: Vec<String>;
+            }
+        }
+    }
+    todo!()
+}
+
 async fn get_contraction_texts(
-    job_detail: JobDetails,
+    job_detail: &JobDetails,
     contraction_f_path: PathBuf,
 ) -> Result<Vec<String>> {
     let mut contraction_str: Vec<String> = Vec::new();
