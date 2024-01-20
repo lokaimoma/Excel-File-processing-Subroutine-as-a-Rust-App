@@ -6,7 +6,7 @@ use crate::{
         DataSource,
     },
     error::Error,
-    Result,
+    Result, DATA_DIR_NAME,
 };
 use aho_corasick::AhoCorasick;
 use axum::{
@@ -20,13 +20,11 @@ use axum::{
 use calamine::{open_workbook_auto, DataType, Reader};
 use serde_json::json;
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{PathBuf, MAIN_SEPARATOR};
 use tokio::fs;
 use tokio_util::io::ReaderStream;
 use tracing::{event, instrument, Level};
 use umya_spreadsheet::{reader, writer};
-
-const DATA_DIR: &str = ".\\data";
 
 pub fn get_routes(datasource: SqliteDataSource) -> Router {
     Router::new()
@@ -71,7 +69,7 @@ async fn run_job(
     )?;
     event!(Level::TRACE, "Sheet is valid");
 
-    let mut contraction_f_path = PathBuf::from(DATA_DIR);
+    let mut contraction_f_path = PathBuf::from(format!(".{MAIN_SEPARATOR}{DATA_DIR_NAME}"));
     let contraction_f_name = format!("contraction_{}.xlsx", uuid::Uuid::now_v7());
     contraction_f_path.push(contraction_f_name);
     let contraction_str: Vec<String> =
@@ -249,7 +247,7 @@ fn highlight_search_terms_and_contractions(
 
             let mut color_profile: &mut Box<dyn CellColorProfile> = &mut color_profiles[0];
             for (idx, contraction) in contraction_str.iter().enumerate() {
-                if cell_text.contains(contraction) {
+                if cell_text.trim().eq_ignore_ascii_case(contraction) {
                     let color_idx = idx + 1 % color_profiles.len();
                     event!(
                         Level::DEBUG,
@@ -261,17 +259,17 @@ fn highlight_search_terms_and_contractions(
                     break;
                 }
             }
-            let cell_style = cell.get_style_mut();
             let mut cell_text = cell.get_value().to_string();
+            let cell_style = cell.get_style_mut();
             event!(Level::TRACE, "Current color profile: {:?}", color_profile);
 
-            // cell_style.set_background_color(colors::to_argb(
-            // &color_profile.as_ref().get_background_color(),
-            // ));
-            // let font = cell_style.get_font_mut();
-            // font.get_color_mut().set_argb(&colors::to_argb(
-            // &color_profile.as_ref().get_default_text_color(),
-            // ));
+            cell_style.set_background_color(colors::to_argb(
+                &color_profile.as_ref().get_background_color(),
+            ));
+            let font = cell_style.get_font_mut();
+            font.get_color_mut().set_argb(&colors::to_argb(
+                &color_profile.as_ref().get_default_text_color(),
+            ));
             let mut offset = 0;
             event!(Level::TRACE, "Formating text using finds");
             for mut finding in new_search_findings {
@@ -283,15 +281,15 @@ fn highlight_search_terms_and_contractions(
                 cell_text.replace_range(
                     finding.start_idx..=finding.end_idx,
                     &format!(
-                        r##"<font color="{txtcolor}">{value}</font>"##,
+                        r##"<font color="{txtcolor}"><b>{value}</b></font>"##,
                         txtcolor = color_profile.get_color(),
                         value = &cell_text[finding.start_idx..=finding.end_idx]
                     ),
                 );
                 // why 29, the new characters added to the old text sum up to 28
-                // 22 = html instructions (including the quote surrounding the color hex), color hex = 7
+                // 29 = html instructions (including the quote surrounding the color hex), color hex = 7
                 // The text value is not part, because they've been accounted for already
-                offset += 29;
+                offset += 36;
                 event!(Level::DEBUG, "New Text: {}", cell_text);
                 event!(Level::TRACE, "New offset: {}", offset);
             }
@@ -345,8 +343,9 @@ async fn get_contraction_texts(
         for col_idx in 1..=max_col {
             for row_idx in 2..=max_row {
                 let cell_text = first_contra_sheet.get_value((col_idx, row_idx));
-                if !cell_text.trim().is_empty() {
-                    contraction_str.push(cell_text.trim().into());
+                let cell_text = cell_text.trim();
+                if !cell_text.is_empty() {
+                    contraction_str.push(cell_text.into());
                 }
             }
         }
@@ -504,7 +503,7 @@ async fn upload_file(
     let fname = fname.unwrap().to_string();
     let bytes = field.bytes().await.unwrap();
 
-    let mut file_path = PathBuf::from(DATA_DIR);
+    let mut file_path = PathBuf::from(format!(".{MAIN_SEPARATOR}{DATA_DIR_NAME}"));
     if !file_path.exists() {
         let _ = fs::create_dir_all(&file_path).await;
     }

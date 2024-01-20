@@ -8,11 +8,17 @@ mod colors;
 mod data;
 pub mod error;
 mod web;
+use std::path::MAIN_SEPARATOR;
+
+const DATA_DIR_NAME: &str = "data_";
 
 pub type Result<T> = std::result::Result<T, error::Error>;
 
 pub async fn get_app_router() -> Result<Router> {
-    let sqlite_con = Connection::open(".\\data\\db.sqlite").unwrap();
+    let sqlite_con = Connection::open(format!(
+        ".{MAIN_SEPARATOR}{DATA_DIR_NAME}{MAIN_SEPARATOR}db.sqlite"
+    ))
+    .unwrap();
     let datasource = SqliteDataSource::new(sqlite_con);
     datasource.init_database().await?;
 
