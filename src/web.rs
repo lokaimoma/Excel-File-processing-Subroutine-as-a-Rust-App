@@ -1,7 +1,7 @@
 use crate::{
     colors::{self, CellColorProfile},
     data::{
-        model::{JobDetails, RowsPayload, UploadFileEntry},
+        model::{JobDetails, RowsPayload, SortInfo, UploadFileEntry},
         sqlite_ds::SqliteDataSource,
         DataSource,
     },
@@ -10,7 +10,7 @@ use crate::{
 };
 use aho_corasick::AhoCorasick;
 use axum::{
-    body,
+    body::{self, Bytes},
     extract::{Multipart, State},
     http::header::{CONTENT_DISPOSITION, CONTENT_TYPE},
     response::{AppendHeaders, IntoResponse},
@@ -20,11 +20,14 @@ use axum::{
 use calamine::{open_workbook_auto, DataType, Reader};
 use serde_json::json;
 use serde_json::Value;
-use std::path::{PathBuf, MAIN_SEPARATOR};
+use std::{
+    collections::HashMap,
+    path::{PathBuf, MAIN_SEPARATOR},
+};
 use tokio::fs;
 use tokio_util::io::ReaderStream;
 use tracing::{event, instrument, Level};
-use umya_spreadsheet::{reader, writer};
+use umya_spreadsheet::{reader, writer, Cell};
 
 pub fn get_routes(datasource: SqliteDataSource) -> Router {
     Router::new()
@@ -34,12 +37,117 @@ pub fn get_routes(datasource: SqliteDataSource) -> Router {
         .with_state(datasource)
 }
 
+fn get_cells(
+    work_sheet: &mut umya_spreadsheet::Worksheet,
+    last_row_idx: usize,
+    last_col_idx: usize,
+) -> Vec<Vec<Cell>> {
+    let mut result: Vec<Vec<Cell>> = Vec::new();
+    for col in 1..=last_col_idx {
+        let mut cur_row: Vec<Cell> = Vec::new();
+        for row in 2..=last_row_idx {
+            cur_row.push(
+                work_sheet
+                    .get_cell((col as u32, row as u32))
+                    .unwrap()
+                    .to_owned(),
+            )
+        }
+        result.push(cur_row);
+    }
+    result
+}
+
+fn sort_cells(cells: &mut [Vec<Cell>], sort_infos: &[SortInfo]) {
+    event!(Level::TRACE, "Sorting cells");
+    if sort_infos.len() < 1 {
+        event!(Level::TRACE, "No columns to sort");
+        return;
+    }
+
+    let mut sortable_rows: HashMap<String, Vec<usize>> = HashMap::new();
+    let sort_info = &sort_infos[0];
+    let mut col_idx: usize = 0;
+
+    sort_cells_by_range(cells, 0..=(cells.len() - 1), sort_info, &mut col_idx);
+    event!(Level::TRACE, "First sort done...");
+
+    event!(Level::TRACE, "Finding sortable rows");
+    clear_build_sortable_rows(cells, col_idx, &mut sortable_rows);
+    event!(Level::TRACE, "Sortable rows found");
+
+    for i in 1..sort_infos.len() {
+        let sort_info = &sort_infos[i];
+        for row_range in sortable_rows
+            .values()
+            .filter(|r| r.len() > 1)
+            .map(|row| row[0]..=row[row.len() - 1])
+        {
+            event!(Level::TRACE, "Performing sort #{}", i);
+            sort_cells_by_range(cells, row_range, sort_info, &mut col_idx);
+            event!(Level::TRACE, "Sort #{} done", i);
+        }
+
+        event!(Level::TRACE, "Finding sortable rows");
+        clear_build_sortable_rows(cells, col_idx, &mut sortable_rows);
+        event!(Level::TRACE, "Sortable rows found");
+    }
+    event!(Level::TRACE, "Done sorting...");
+}
+
+#[inline(always)]
+fn sort_cells_by_range(
+    cells: &mut [Vec<Cell>],
+    row_range: std::ops::RangeInclusive<usize>,
+    sort_info: &SortInfo,
+    col_idx: &mut usize,
+) {
+    cells[row_range].sort_unstable_by(|s1, s2| match sort_info {
+        crate::data::model::SortInfo::ASC { column_index } => {
+            *col_idx = column_index.to_owned() as usize;
+            return s1[*col_idx]
+                .get_value()
+                .as_ref()
+                .partial_cmp(s2[*col_idx].get_value().as_ref())
+                .unwrap();
+        }
+        crate::data::model::SortInfo::DESC { column_index } => {
+            *col_idx = column_index.to_owned() as usize;
+            return s2[*col_idx]
+                .get_value()
+                .as_ref()
+                .partial_cmp(s1[*col_idx].get_value().as_ref())
+                .unwrap();
+        }
+    });
+}
+
+#[inline(always)]
+fn clear_build_sortable_rows(
+    cells: &mut [Vec<Cell>],
+    col_idx: usize,
+    sortable_rows: &mut HashMap<String, Vec<usize>>,
+) {
+    for (idx, row) in cells.iter().enumerate() {
+        let key = row[col_idx].get_value();
+        let value = sortable_rows.get_mut(key.as_ref());
+        if value.is_some() {
+            let value = value.unwrap();
+            value.push(idx);
+        } else {
+            let mut v = Vec::new();
+            v.push(idx);
+            sortable_rows.insert(key.to_string(), v);
+        }
+    }
+}
+
 #[instrument]
 async fn run_job(
     State(datasource): State<SqliteDataSource>,
     multipart: Multipart,
 ) -> impl IntoResponse {
-    let job_detail = JobDetails::try_from(multipart).await?;
+    let mut job_detail = JobDetails::try_from(multipart).await?;
     event!(Level::DEBUG, "Job details: {:?}", job_detail);
     let spreadsheet = datasource
         .get_file_entry(job_detail.file_id().to_owned())
@@ -69,27 +177,30 @@ async fn run_job(
     )?;
     event!(Level::TRACE, "Sheet is valid");
 
-    let mut contraction_f_path = PathBuf::from(format!(".{MAIN_SEPARATOR}{DATA_DIR_NAME}"));
-    let contraction_f_name = format!("contraction_{}.xlsx", uuid::Uuid::now_v7());
-    contraction_f_path.push(contraction_f_name);
-    let contraction_str: Vec<String> =
-        get_contraction_texts(&job_detail, &contraction_f_path).await?;
+    let contraction_f_bytes = job_detail.pop_contraction_file();
+
+    let contraction_task = tokio::spawn(async move {
+        let mut contraction_f_path = PathBuf::from(format!(".{MAIN_SEPARATOR}{DATA_DIR_NAME}"));
+        let contraction_f_name = format!("contraction_{}.xlsx", uuid::Uuid::now_v7());
+        contraction_f_path.push(contraction_f_name);
+        get_contraction_texts(contraction_f_bytes, &contraction_f_path).await
+    });
+
+    let mut cells = get_cells(worksheet, last_row_idx as usize, last_col_idx as usize);
+
+    sort_cells(cells.as_mut_slice(), job_detail.sort_infos());
+
+    let contraction_str = contraction_task.await.unwrap()?;
 
     event!(Level::TRACE, "Highlighting search terms and contractions");
-    highlight_search_terms_and_contractions(
-        last_col_idx,
-        last_row_idx,
-        worksheet,
-        &job_detail,
-        &contraction_str,
-    )?;
+    highlight_search_terms_and_contractions(cells.as_mut_slice(), &job_detail, &contraction_str)?;
     event!(
         Level::TRACE,
         "Done highlighting search terms and contractions"
     );
 
     let final_f_name = format!("contraction_{}.xlsx", uuid::Uuid::now_v7());
-    contraction_f_path.pop();
+    let mut contraction_f_path = PathBuf::from(format!(".{MAIN_SEPARATOR}{DATA_DIR_NAME}"));
     contraction_f_path.push(final_f_name);
 
     event!(Level::TRACE, "Saving final contraction file....");
@@ -122,13 +233,10 @@ async fn run_job(
 struct FoundSubTextPosInfo {
     start_idx: usize,
     end_idx: usize,
-    index_in_search_vec: usize,
 }
 
 fn highlight_search_terms_and_contractions(
-    last_col_idx: u32,
-    last_row_idx: u32,
-    work_sheet: &mut umya_spreadsheet::Worksheet,
+    cells: &mut [Vec<Cell>],
     job_detail: &JobDetails,
     contraction_str: &[String],
 ) -> Result<()> {
@@ -149,25 +257,23 @@ fn highlight_search_terms_and_contractions(
     ];
 
     let search_terms = job_detail.search_terms();
-    for col_idx in 1..=last_col_idx {
-        for row_idx in 2..=last_row_idx {
-            let cell = work_sheet.get_cell_mut((col_idx, row_idx));
-            let cell_text = cell.get_value();
+    let ac = AhoCorasick::new(search_terms).unwrap();
 
+    cells.iter_mut().for_each(|row| {
+        row.iter_mut().for_each(|cell| {
+            let cell_text = cell.get_value().to_string();
             //  aho_corsick
-            let ac = AhoCorasick::new(search_terms).unwrap();
             event!(
                 Level::TRACE,
                 message = "Searching cell value for search patterns",
-                cell_value = cell_text.as_ref(),
+                cell_value = cell_text,
                 search_patterns = format!("{:?}", search_terms)
             );
             let mut search_findings: Vec<FoundSubTextPosInfo> = ac
-                .find_overlapping_iter(cell_text.as_ref())
+                .find_overlapping_iter(&cell_text)
                 .map(|finding| FoundSubTextPosInfo {
                     start_idx: finding.start(),
                     end_idx: finding.end() - 1,
-                    index_in_search_vec: finding.pattern().as_usize(),
                 })
                 .collect();
 
@@ -183,67 +289,8 @@ fn highlight_search_terms_and_contractions(
                 Level::TRACE,
                 "Searching for overlaps in search findings, and recalculating their start and end"
             );
-            let mut new_search_findings = Vec::clone(&search_findings);
-            for i in 0..search_findings.len() {
-                let f1 = search_findings[i];
-                event!(Level::TRACE, "At index i={}; Finding = {:?}", i, f1);
-                for j in i + 1..search_findings.len() {
-                    let f2 = search_findings[j];
-                    let new_f2 = &mut new_search_findings[j];
-                    event!(
-                        Level::TRACE,
-                        "Checking index j={}; Finding = {:?}; New Finding = {:?}",
-                        j,
-                        f2,
-                        new_f2
-                    );
-                    let range = f1.start_idx..=f1.end_idx;
-                    event!(Level::TRACE, "Range of of f1: {:?}", range);
-                    if range.contains(&f2.start_idx) {
-                        event!(Level::TRACE, "Start of f2 in f1");
-                        if range.contains(&f2.end_idx) {
-                            event!(Level::TRACE, "End of f2 in f1");
-                            new_f2.end_idx = 0;
-                            new_f2.start_idx = 0;
-                            event!(
-                                Level::TRACE,
-                                "Final findings f2={:?}; new_f2={:?}",
-                                f2,
-                                new_f2
-                            );
-                            continue;
-                        }
-                        event!(Level::TRACE, "end of f2 out of f1 range");
-                        let new_start = f1.end_idx + 1;
-                        if new_start > new_f2.start_idx && new_start < new_f2.end_idx {
-                            new_f2.start_idx = new_start;
-                        } else {
-                            new_f2.start_idx = new_f2.end_idx
-                        }
-                        event!(
-                            Level::TRACE,
-                            "Final findings f2={:?}; new_f2={:?}",
-                            f2,
-                            new_f2
-                        );
-                    }
-                }
-                event!(
-                    Level::DEBUG,
-                    message = format!("Iter {}", i),
-                    new_search_findings = format!("{:?}", new_search_findings)
-                );
-            }
-            event!(Level::TRACE, "Removing findings with start and end = 0");
-            let new_search_findings: Vec<FoundSubTextPosInfo> = new_search_findings
-                .into_iter()
-                .filter(|finding| finding.start_idx != 0 || finding.end_idx != 0)
-                .collect();
-            event!(
-                Level::DEBUG,
-                message = "Final findings",
-                findings = format!("{:?}", new_search_findings)
-            );
+
+            let new_search_findings = apply_overlapping_rule(search_findings);
 
             let mut color_profile: &mut Box<dyn CellColorProfile> = &mut color_profiles[0];
             for (idx, contraction) in contraction_str.iter().enumerate() {
@@ -252,70 +299,154 @@ fn highlight_search_terms_and_contractions(
                     event!(
                         Level::DEBUG,
                         "Contraction found for cell value={}, choosing color at idx={}",
-                        cell_text.as_ref(),
+                        cell_text,
                         color_idx
                     );
                     color_profile = &mut color_profiles[color_idx];
                     break;
                 }
             }
-            let mut cell_text = cell.get_value().to_string();
-            let cell_style = cell.get_style_mut();
-            event!(Level::TRACE, "Current color profile: {:?}", color_profile);
-
-            cell_style.set_background_color(colors::to_argb(
-                &color_profile.as_ref().get_background_color(),
-            ));
-            let font = cell_style.get_font_mut();
-            font.get_color_mut().set_argb(&colors::to_argb(
-                &color_profile.as_ref().get_default_text_color(),
-            ));
-            let mut offset = 0;
-            event!(Level::TRACE, "Formating text using finds");
-            for mut finding in new_search_findings {
-                // Adding the html font tags,etc changes the position of the texts
-                // we would have to update the position of the findings.
-                // luckily they're in ascending order so we just add offset
-                finding.start_idx += offset;
-                finding.end_idx += offset;
-                cell_text.replace_range(
-                    finding.start_idx..=finding.end_idx,
-                    &format!(
-                        r##"<font color="{txtcolor}"><b>{value}</b></font>"##,
-                        txtcolor = color_profile.get_color(),
-                        value = &cell_text[finding.start_idx..=finding.end_idx]
-                    ),
-                );
-                // why 29, the new characters added to the old text sum up to 28
-                // 29 = html instructions (including the quote surrounding the color hex), color hex = 7
-                // The text value is not part, because they've been accounted for already
-                offset += 36;
-                event!(Level::DEBUG, "New Text: {}", cell_text);
-                event!(Level::TRACE, "New offset: {}", offset);
-            }
-            event!(Level::TRACE, "Setting rich text");
-            cell.set_rich_text(
-                umya_spreadsheet::helper::html::html_to_richtext(&cell_text).unwrap(),
-            );
-            color_profile.reset_color_pool_pos();
-        }
-    }
+            apply_formatting(cell, color_profile, new_search_findings);
+        })
+    });
 
     Ok(())
 }
 
+#[inline(always)]
+fn apply_formatting(
+    cell: &mut Cell,
+    color_profile: &mut Box<dyn CellColorProfile>,
+    new_search_findings: Vec<FoundSubTextPosInfo>,
+) {
+    let mut cell_text = cell.get_value().to_string();
+    let cell_style = cell.get_style_mut();
+
+    event!(Level::TRACE, "Current color profile: {:?}", color_profile);
+
+    cell_style.set_background_color(colors::to_argb(
+        &color_profile.as_ref().get_background_color(),
+    ));
+
+    let font = cell_style.get_font_mut();
+    font.get_color_mut().set_argb(&colors::to_argb(
+        &color_profile.as_ref().get_default_text_color(),
+    ));
+
+    let mut offset = 0;
+    event!(Level::TRACE, "Formating text using finds");
+    for mut finding in new_search_findings {
+        // Adding the html font tags,etc changes the position of the texts
+        // we would have to update the position of the findings.
+        // luckily they're in ascending order so we just add offset
+        finding.start_idx += offset;
+        finding.end_idx += offset;
+        cell_text.replace_range(
+            finding.start_idx..=finding.end_idx,
+            &format!(
+                r##"<font color="{txtcolor}"><b>{value}</b></font>"##,
+                txtcolor = color_profile.get_color(),
+                value = &cell_text[finding.start_idx..=finding.end_idx]
+            ),
+        );
+        // why 29, the new characters added to the old text sum up to 28
+        // 29 = html instructions (including the quote surrounding the color hex), color hex = 7
+        // The text value is not part, because they've been accounted for already
+        offset += 36;
+        event!(Level::DEBUG, "New Text: {}", cell_text);
+        event!(Level::TRACE, "New offset: {}", offset);
+    }
+    event!(Level::TRACE, "Setting rich text");
+    cell.set_rich_text(umya_spreadsheet::helper::html::html_to_richtext(&cell_text).unwrap());
+    color_profile.reset_color_pool_pos();
+}
+
+#[inline(always)]
+fn apply_overlapping_rule(search_findings: Vec<FoundSubTextPosInfo>) -> Vec<FoundSubTextPosInfo> {
+    let mut new_search_findings = Vec::clone(&search_findings);
+
+    for i in 0..search_findings.len() {
+        let f1 = search_findings[i];
+
+        event!(Level::TRACE, "At index i={}; Finding = {:?}", i, f1);
+
+        for j in i + 1..search_findings.len() {
+            let f2 = search_findings[j];
+            let new_f2 = &mut new_search_findings[j];
+
+            event!(
+                Level::TRACE,
+                "Checking index j={}; Finding = {:?}; New Finding = {:?}",
+                j,
+                f2,
+                new_f2
+            );
+
+            let range = f1.start_idx..=f1.end_idx;
+
+            event!(Level::TRACE, "Range of of f1: {:?}", range);
+
+            if range.contains(&f2.start_idx) {
+                event!(Level::TRACE, "Start of f2 in f1");
+
+                if range.contains(&f2.end_idx) {
+                    event!(Level::TRACE, "End of f2 in f1");
+
+                    new_f2.end_idx = 0;
+                    new_f2.start_idx = 0;
+
+                    event!(
+                        Level::TRACE,
+                        "Final findings f2={:?}; new_f2={:?}",
+                        f2,
+                        new_f2
+                    );
+                    continue;
+                }
+
+                event!(Level::TRACE, "end of f2 out of f1 range");
+
+                let new_start = f1.end_idx + 1;
+                if new_start > new_f2.start_idx && new_start < new_f2.end_idx {
+                    new_f2.start_idx = new_start;
+                } else {
+                    new_f2.start_idx = new_f2.end_idx
+                }
+
+                event!(
+                    Level::TRACE,
+                    "Final findings f2={:?}; new_f2={:?}",
+                    f2,
+                    new_f2
+                );
+            }
+        }
+        event!(
+            Level::DEBUG,
+            message = format!("Iter {}", i),
+            new_search_findings = format!("{:?}", new_search_findings)
+        );
+    }
+    event!(Level::TRACE, "Removing findings with start and end = 0");
+    let new_search_findings: Vec<FoundSubTextPosInfo> = new_search_findings
+        .into_iter()
+        .filter(|finding| finding.start_idx != 0 || finding.end_idx != 0)
+        .collect();
+    event!(
+        Level::DEBUG,
+        message = "Final findings",
+        findings = format!("{:?}", new_search_findings)
+    );
+    new_search_findings
+}
+
 async fn get_contraction_texts(
-    job_detail: &JobDetails,
+    contraction_f_bytes: Option<Bytes>,
     contraction_f_path: &PathBuf,
 ) -> Result<Vec<String>> {
     let mut contraction_str: Vec<String> = Vec::new();
-    if job_detail.contraction_file().is_some() {
-        if let Err(e) = fs::write(
-            &contraction_f_path,
-            job_detail.contraction_file().as_ref().unwrap().as_ref(),
-        )
-        .await
-        {
+    if contraction_f_bytes.is_some() {
+        if let Err(e) = fs::write(&contraction_f_path, contraction_f_bytes.unwrap()).await {
             return Err(Error::IOError(format!(
                 "Error writing contraction file to disk, {}",
                 e.to_string()

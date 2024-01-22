@@ -44,7 +44,7 @@ impl JobDetails {
     const SORT_COL_FIELD_N: &'static str = "sortCol";
     const SEARCH_TERM_COUNTER_LIMIT: usize = 5;
 
-    pub fn sort_infos(&self) -> &Vec<SortInfo> {
+    pub fn sort_infos(&self) -> &[SortInfo] {
         &self.sort_cols_info
     }
 
@@ -52,8 +52,10 @@ impl JobDetails {
         &self.file_id
     }
 
-    pub fn contraction_file(&self) -> &Option<Bytes> {
-        &self.contraction_file
+    pub fn pop_contraction_file(&mut self) -> Option<Bytes> {
+        let bytes = self.contraction_file.clone();
+        self.contraction_file = None;
+        bytes
     }
 
     pub fn search_terms(&self) -> &Vec<String> {
