@@ -43,9 +43,9 @@ fn get_cells(
     last_col_idx: usize,
 ) -> Vec<Vec<Cell>> {
     let mut result: Vec<Vec<Cell>> = Vec::new();
-    for col in 1..=last_col_idx {
+    for row in 2..=last_row_idx {
         let mut cur_row: Vec<Cell> = Vec::new();
-        for row in 2..=last_row_idx {
+        for col in 1..=last_col_idx {
             cur_row.push(
                 work_sheet
                     .get_cell((col as u32, row as u32))
@@ -104,7 +104,9 @@ fn sort_cells_by_range(
 ) {
     cells[row_range].sort_unstable_by(|s1, s2| match sort_info {
         crate::data::model::SortInfo::ASC { column_index } => {
-            *col_idx = column_index.to_owned() as usize;
+            // The column index we are receiving from the user
+            // doesn't start counting from 0, hence the -1 here
+            *col_idx = (column_index.to_owned() - 1) as usize;
             return s1[*col_idx]
                 .get_value()
                 .as_ref()
@@ -112,7 +114,9 @@ fn sort_cells_by_range(
                 .unwrap();
         }
         crate::data::model::SortInfo::DESC { column_index } => {
-            *col_idx = column_index.to_owned() as usize;
+            // The column index we are receiving from the user
+            // doesn't start counting from 0, hence the -1 here
+            *col_idx = (column_index.to_owned() - 1) as usize;
             return s2[*col_idx]
                 .get_value()
                 .as_ref()
@@ -186,7 +190,25 @@ async fn run_job(
         get_contraction_texts(contraction_f_bytes, &contraction_f_path).await
     });
 
+    event!(Level::TRACE, "Copying cell values into Vec<Vec<Cell>>");
     let mut cells = get_cells(worksheet, last_row_idx as usize, last_col_idx as usize);
+    if cells.len() > 1 {
+        event!(
+            Level::TRACE,
+            "Done copying, Row count: {}, expected: {}. Col count: {}, expected: {}",
+            cells.len(),
+            last_row_idx,
+            cells[0].len(),
+            last_row_idx
+        );
+    } else {
+        event!(
+            Level::TRACE,
+            "No values in sheet to copy, Row count: {}, Col count: {}",
+            last_row_idx,
+            last_col_idx
+        );
+    }
 
     sort_cells(cells.as_mut_slice(), job_detail.sort_infos());
 
@@ -198,6 +220,25 @@ async fn run_job(
         Level::TRACE,
         "Done highlighting search terms and contractions"
     );
+
+    // TODO: mutate excel file
+    // We read the cells from row 2 and col 1
+    // Hence we have to offset the indexes below
+    // by them, to set them at the right place.
+    event!(Level::TRACE, "Mutating spreadsheet");
+    const ROW_OFFSET: usize = 2;
+    const COL_OFFSET: usize = 1;
+    cells.into_iter().enumerate().for_each(|(row_idx, row)| {
+        row.into_iter()
+            .enumerate()
+            .for_each(|(col_idx, mut col_cell)| {
+                let coordinate = col_cell.get_coordinate_mut();
+                coordinate.set_row_num((row_idx + ROW_OFFSET) as u32);
+                coordinate.set_col_num((col_idx + COL_OFFSET) as u32);
+                worksheet.set_cell(col_cell);
+            });
+    });
+    event!(Level::TRACE, "Done mutating spreadsheet");
 
     let final_f_name = format!("contraction_{}.xlsx", uuid::Uuid::now_v7());
     let mut contraction_f_path = PathBuf::from(format!(".{MAIN_SEPARATOR}{DATA_DIR_NAME}"));
