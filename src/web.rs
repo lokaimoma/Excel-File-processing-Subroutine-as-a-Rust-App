@@ -72,25 +72,21 @@ fn sort_cells(cells: &mut [Vec<Cell>], sort_infos: &[SortInfo]) {
     sort_cells_by_range(cells, 0..=(cells.len() - 1), sort_info, &mut col_idx);
     event!(Level::TRACE, "First sort done...");
 
-    event!(Level::TRACE, "Finding sortable rows");
-    clear_build_sortable_rows(cells, col_idx, &mut sortable_rows);
-    event!(Level::TRACE, "Sortable rows found");
-
     for i in 1..sort_infos.len() {
+        event!(Level::TRACE, "Finding sortable rows");
+        clear_build_sortable_rows(cells, col_idx, &mut sortable_rows);
+        event!(Level::TRACE, "Sortable rows found");
+
         let sort_info = &sort_infos[i];
         for row_range in sortable_rows
             .values()
             .filter(|r| r.len() > 1)
             .map(|row| row[0]..=row[row.len() - 1])
         {
-            event!(Level::TRACE, "Performing sort #{}", i);
+            event!(Level::TRACE, "Performing sub sort in iter #{}", i);
             sort_cells_by_range(cells, row_range, sort_info, &mut col_idx);
-            event!(Level::TRACE, "Sort #{} done", i);
+            event!(Level::TRACE, "Sub sort in iter #{} done", i);
         }
-
-        event!(Level::TRACE, "Finding sortable rows");
-        clear_build_sortable_rows(cells, col_idx, &mut sortable_rows);
-        event!(Level::TRACE, "Sortable rows found");
     }
     event!(Level::TRACE, "Done sorting...");
 }
@@ -197,9 +193,10 @@ async fn run_job(
             Level::TRACE,
             "Done copying, Row count: {}, expected: {}. Col count: {}, expected: {}",
             cells.len(),
-            last_row_idx,
+            // Minus header row
+            last_row_idx - 1,
             cells[0].len(),
-            last_row_idx
+            last_col_idx
         );
     } else {
         event!(
