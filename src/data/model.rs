@@ -15,11 +15,11 @@ pub struct RunJobResponse(Vec<u8>);
 pub struct RunJobRequest {
     file_id: String,
     contraction_file: Option<Vec<u8>>,
-    #[schema(example = "SKU")]
+    #[schema(example = json!({"search_term": ["SKU"]}))]
     search_term: Vec<String>,
-    #[schema(example = "1")]
+    #[schema(example = json!({"check_date": [1,2,3]}))]
     check_date: Vec<u32>,
-    #[schema(example = "asc/desc,column_index, E.g asc,1")]
+    #[schema(example = json!({"sort_col": ["asc,1", "desc,2", "desc,3", "asc,4"]}))]
     sort_col: Vec<String>,
 }
 
