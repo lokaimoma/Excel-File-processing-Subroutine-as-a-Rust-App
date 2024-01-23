@@ -1,19 +1,20 @@
 use axum::body::Bytes;
 use axum::extract::Multipart;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::{error::Error, Result};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct UploadFileEntry {
     pub id: String,
     #[serde(skip)]
     pub file_path: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct RowsPayload {
-    pub rows: Vec<String>,
+    pub columns: Vec<String>,
 }
 
 #[derive(Debug)]

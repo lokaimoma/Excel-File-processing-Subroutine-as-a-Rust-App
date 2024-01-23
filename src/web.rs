@@ -28,9 +28,22 @@ use tokio::fs;
 use tokio_util::io::ReaderStream;
 use tracing::{event, instrument, Level};
 use umya_spreadsheet::{reader, writer, Cell};
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(get_header_row),
+    components(
+        schemas(UploadFileEntry),
+        schemas(RowsPayload)
+    )
+)]
+struct APIDoc;
 
 pub fn get_routes(datasource: SqliteDataSource) -> Router {
     Router::new()
+        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", APIDoc::openapi()))
         .route("/upload", post(upload_file))
         .route("/getHeader/:entry_uuid", get(get_header_row))
         .route("/runJob", post(run_job))
@@ -592,6 +605,13 @@ fn validate_sheet(
     Ok(())
 }
 
+#[utoipa::path(
+    get, 
+    path = "/getHeader/{entry_uuid}", 
+    responses(
+        (status = 200, description = "The header row of the excel file, with each string representing a column", body = RowsPayload)
+    )
+)]
 async fn get_header_row(
     State(datasource): State<SqliteDataSource>,
     Path(entry_uuid): Path<String>,
@@ -617,7 +637,7 @@ async fn get_header_row(
         Ok(v) => v,
     };
 
-    let rows: Vec<String> = rows_data
+    let columns: Vec<String> = rows_data
         .rows()
         .take(1)
         .flat_map(|r| {
@@ -641,7 +661,7 @@ async fn get_header_row(
         })
         .collect();
 
-    let rows = RowsPayload { rows };
+    let rows = RowsPayload { columns };
     let rows = json!(rows);
 
     Ok(Json(rows))
