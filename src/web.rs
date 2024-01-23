@@ -11,10 +11,10 @@ use crate::{
 use aho_corasick::AhoCorasick;
 use axum::{
     body::{self, Bytes},
-    extract::{Multipart, State},
+    extract::{Multipart, Path, State},
     http::header::{CONTENT_DISPOSITION, CONTENT_TYPE},
     response::{AppendHeaders, IntoResponse},
-    routing::post,
+    routing::{get, post},
     Json, Router,
 };
 use calamine::{open_workbook_auto, DataType, Reader};
@@ -32,7 +32,7 @@ use umya_spreadsheet::{reader, writer, Cell};
 pub fn get_routes(datasource: SqliteDataSource) -> Router {
     Router::new()
         .route("/upload", post(upload_file))
-        .route("/getHeader", post(get_header_row))
+        .route("/getHeader/:entry_uuid", get(get_header_row))
         .route("/runJob", post(run_job))
         .with_state(datasource)
 }
@@ -594,9 +594,9 @@ fn validate_sheet(
 
 async fn get_header_row(
     State(datasource): State<SqliteDataSource>,
-    Json(partial_f_entry): Json<UploadFileEntry>,
+    Path(entry_uuid): Path<String>,
 ) -> Result<Json<Value>> {
-    let result = match datasource.get_file_entry(partial_f_entry.id).await {
+    let result = match datasource.get_file_entry(entry_uuid).await {
         Ok(r) => r,
         Err(e) => return Err(Error::DatabaseOperationFailed(e.to_string())),
     };
