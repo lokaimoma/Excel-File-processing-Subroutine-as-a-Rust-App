@@ -1,7 +1,7 @@
 use crate::{
     colors::{self, CellColorProfile},
     data::{
-        model::{JobDetails, RowsPayload, SortInfo, UploadFileEntry},
+        model::{JobDetails, RowsPayload, SortInfo, UploadFileEntry, ExcelFileForm, RunJobRequest, RunJobResponse},
         sqlite_ds::SqliteDataSource,
         DataSource,
     },
@@ -19,7 +19,6 @@ use axum::{
 };
 use serde_json::json;
 use serde_json::Value;
-use xlsxwriter::worksheet::filter::FilterRule;
 use std::{
     collections::HashMap,
     path::{PathBuf, MAIN_SEPARATOR},
@@ -28,21 +27,23 @@ use tokio::fs;
 use tokio_util::io::ReaderStream;
 use tracing::{event, instrument, Level};
 use umya_spreadsheet::{reader, writer, Cell};
-use utoipa::{OpenApi, ToSchema};
+use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
-
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(get_header_row, upload_file),
+    paths(get_header_row, upload_file, run_job),
     components(
         schemas(UploadFileEntry),
         schemas(RowsPayload),
         schemas(ExcelFileForm),
         schemas(Error),
+        schemas(RunJobRequest),
+        schemas(RunJobResponse),
     )
 )]
-struct APIDoc;
+pub struct APIDoc;
+
 
 pub fn get_routes(datasource: SqliteDataSource) -> Router {
     Router::new()
@@ -76,7 +77,7 @@ fn get_cells(
 
 fn sort_cells(cells: &mut [Vec<Cell>], sort_infos: &[SortInfo]) {
     event!(Level::TRACE, "Sorting cells");
-    if sort_infos.len() < 1 {
+    if sort_infos.is_empty() {
         event!(Level::TRACE, "No columns to sort");
         return;
     }
@@ -88,12 +89,12 @@ fn sort_cells(cells: &mut [Vec<Cell>], sort_infos: &[SortInfo]) {
     sort_cells_by_range(cells, 0..=(cells.len() - 1), sort_info, &mut col_idx);
     event!(Level::TRACE, "First sort done...");
 
-    for i in 1..sort_infos.len() {
+    let sort_infos = sort_infos.iter().skip(1).collect::<Vec<_>>();
+    sort_infos.iter().enumerate().for_each(|(i, sort_info)| {
         event!(Level::TRACE, "Finding sortable rows");
         clear_build_sortable_rows(cells, col_idx, &mut sortable_rows);
         event!(Level::TRACE, "Sortable rows found");
 
-        let sort_info = &sort_infos[i];
         for row_range in sortable_rows
             .values()
             .filter(|r| r.len() > 1)
@@ -103,7 +104,8 @@ fn sort_cells(cells: &mut [Vec<Cell>], sort_infos: &[SortInfo]) {
             sort_cells_by_range(cells, row_range, sort_info, &mut col_idx);
             event!(Level::TRACE, "Sub sort in iter #{} done", i);
         }
-    }
+    });
+    
     event!(Level::TRACE, "Done sorting...");
 }
 
@@ -115,7 +117,7 @@ fn sort_cells_by_range(
     col_idx: &mut usize,
 ) {
     cells[row_range].sort_unstable_by(|s1, s2| match sort_info {
-        crate::data::model::SortInfo::ASC { column_index } => {
+        crate::data::model::SortInfo::Asc { column_index } => {
             // The column index we are receiving from the user
             // doesn't start counting from 0, hence the -1 here
             *col_idx = (column_index.to_owned() - 1) as usize;
@@ -125,7 +127,7 @@ fn sort_cells_by_range(
                 .partial_cmp(s2[*col_idx].get_value().as_ref())
                 .unwrap();
         }
-        crate::data::model::SortInfo::DESC { column_index } => {
+        crate::data::model::SortInfo::Desc { column_index } => {
             // The column index we are receiving from the user
             // doesn't start counting from 0, hence the -1 here
             *col_idx = (column_index.to_owned() - 1) as usize;
@@ -151,13 +153,22 @@ fn clear_build_sortable_rows(
             let value = value.unwrap();
             value.push(idx);
         } else {
-            let mut v = Vec::new();
-            v.push(idx);
-            sortable_rows.insert(key.to_string(), v);
+            sortable_rows.insert(key.to_string(), vec![idx]);
         }
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/runJob",
+    responses(
+        (status = 200, body=RunJobResponse, description="Contraction excel file to download"),
+        (status = 501, body=Error, description="An error message")
+    ),
+    request_body(
+        content = RunJobRequest, content_type = "multipart/form-data"
+    )
+)]
 #[instrument]
 async fn run_job(
     State(datasource): State<SqliteDataSource>,
@@ -503,11 +514,11 @@ async fn get_contraction_texts(
         if let Err(e) = fs::write(&contraction_f_path, contraction_f_bytes.unwrap()).await {
             return Err(Error::IOError(format!(
                 "Error writing contraction file to disk, {}",
-                e.to_string()
+                e
             )));
         };
 
-        let contraction_wkbook = reader::xlsx::read(&contraction_f_path);
+        let contraction_wkbook = reader::xlsx::read(contraction_f_path);
 
         if contraction_wkbook.is_err() {
             return Err(Error::IOError(
@@ -574,7 +585,7 @@ fn validate_sheet(
                 )));
             }
             let month_val = month_val.unwrap();
-            if month_val < 1 || month_val > 12 {
+            if !(1..=12).contains(&month_val) {
                 return Err(Error::Generic(format!(
                     "Invalid month value for date field. Value = {}, column: {}, row: {}",
                     month, col_idx, row_idx
@@ -589,7 +600,7 @@ fn validate_sheet(
                 )));
             }
             let day_val = day_val.unwrap();
-            if day_val < 1 || day_val > 31 {
+            if !(1..=31).contains(&day_val) {
                 return Err(Error::Generic(format!(
                     "Invalid day value for date field. Value = {}, column: {}, row: {}",
                     day, col_idx, row_idx
@@ -654,14 +665,12 @@ async fn get_header_row(
     Ok(Json(rows))
 }
 
-#[derive(ToSchema)]
-struct ExcelFileForm{ file: Vec<u8>}
 
 
 #[utoipa::path(
     post,
     path = "/upload",
-    request_body(content_type = "multipart/formdata", content = ExcelFileForm),
+    request_body(content_type = "multipart/form-data", content = ExcelFileForm),
     responses(
         (status=201, body = UploadFileEntry, description = "id for referencing the uploaded file for subsequent operations"),
         (status=500, body = Error, description = "Error in multipart form data or no file found error")

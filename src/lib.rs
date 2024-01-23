@@ -1,4 +1,5 @@
 use axum::Router;
+use std::path::MAIN_SEPARATOR;
 
 use data::{sqlite_ds::SqliteDataSource, DataSource};
 use rusqlite::Connection;
@@ -8,7 +9,6 @@ mod colors;
 mod data;
 pub mod error;
 mod web;
-use std::path::MAIN_SEPARATOR;
 
 const DATA_DIR_NAME: &str = "data_";
 

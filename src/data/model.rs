@@ -1,9 +1,33 @@
+use crate::Result;
 use axum::body::Bytes;
 use axum::extract::Multipart;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::error::Error;
+
+#[derive(ToSchema)]
+pub struct RunJobResponse(Vec<u8>);
+
+#[allow(dead_code)]
+#[derive(ToSchema)]
+#[schema(rename_all = "camelCase")]
+pub struct RunJobRequest {
+    file_id: String,
+    contraction_file: Option<Vec<u8>>,
+    #[schema(example = "SKU")]
+    search_term: Vec<String>,
+    #[schema(example = "1")]
+    check_date: Vec<u32>,
+    #[schema(example = "asc/desc,column_index, E.g asc,1")]
+    sort_col: Vec<String>,
+}
+
+#[allow(dead_code)]
+#[derive(ToSchema)]
+pub struct ExcelFileForm {
+    file: Vec<u8>,
+}
 
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct UploadFileEntry {
@@ -19,8 +43,8 @@ pub struct RowsPayload {
 
 #[derive(Debug)]
 pub enum SortInfo {
-    ASC { column_index: u32 },
-    DESC { column_index: u32 },
+    Asc { column_index: u32 },
+    Desc { column_index: u32 },
 }
 
 impl SortInfo {
@@ -67,7 +91,7 @@ impl JobDetails {
         &self.check_date_cols
     }
 
-    pub async fn try_from(mut value: Multipart) -> Res<Self> {
+    pub async fn try_from(mut value: Multipart) -> Result<Self> {
         let mut file_id: Option<String> = None;
         let mut contraction_file: Option<Bytes> = None;
         let mut search_terms: Vec<String> = Vec::with_capacity(5);
@@ -92,7 +116,7 @@ impl JobDetails {
                 JobDetails::SEARCH_TERMS_FIELD_N => {
                     if search_t_counter < JobDetails::SEARCH_TERM_COUNTER_LIMIT {
                         let text = field.text().await?;
-                        search_terms.insert(search_t_counter, text.into());
+                        search_terms.insert(search_t_counter, text);
                         search_t_counter += 1;
                     }
                 }
@@ -110,13 +134,12 @@ impl JobDetails {
                     // order can be asc / desc (lowercase)
                     let text = field.text().await?;
                     let text = text.trim();
-                    let text_parts: Vec<&str> = text.split(",").collect();
+                    let text_parts: Vec<&str> = text.split(',').collect();
                     if text_parts.len() < 2 {
                         return Err(Error::Generic(format!("sortCol data has to be of form order,index Where order can take as value either asc or desc. Got: {}", text)));
                     }
                     let order = text_parts[0];
                     let order = order.to_lowercase();
-                    let sort_info: SortInfo;
                     let index = text_parts[1];
                     let index_val = index.parse::<u32>();
                     if index_val.is_err() {
@@ -125,24 +148,20 @@ impl JobDetails {
                             index
                         )));
                     }
-                    match order.as_str() {
-                        SortInfo::ASC => {
-                            sort_info = SortInfo::ASC {
-                                column_index: index_val.unwrap(),
-                            }
-                        }
-                        SortInfo::DESC => {
-                            sort_info = SortInfo::DESC {
-                                column_index: index_val.unwrap(),
-                            }
-                        }
+                    let sort_info = match order.as_str() {
+                        SortInfo::ASC => SortInfo::Asc {
+                            column_index: index_val.unwrap(),
+                        },
+                        SortInfo::DESC => SortInfo::Desc {
+                            column_index: index_val.unwrap(),
+                        },
                         _ => {
                             return Err(Error::Generic(format!(
                                 "Invalid sort order value: Got {}, Expected: asc / desc",
                                 order
                             )));
                         }
-                    }
+                    };
                     sor_infos.push(sort_info);
                 }
                 _ => {}

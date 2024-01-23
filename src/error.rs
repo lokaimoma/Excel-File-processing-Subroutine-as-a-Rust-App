@@ -40,8 +40,6 @@ impl IntoResponse for Error {
 
 impl From<axum::extract::multipart::MultipartError> for Error {
     fn from(value: axum::extract::multipart::MultipartError) -> Self {
-        Self::MultipartFormError(
-            format!("Error parsing multipart formdata: {}", value.to_string()).to_string(),
-        )
+        Self::MultipartFormError(format!("Error parsing multipart formdata: {}", value).to_string())
     }
 }

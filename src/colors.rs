@@ -1,13 +1,13 @@
 use std::fmt::Debug;
 
 // Color Pool => [Red, Purple, Cyan, Green, Gray]
-const DARK_COLOR_POOL: [&'static str; 5] = ["#ff0000", "#D49BF8", "#00FFFF", "#90EE90", "#B0B0B0"];
-const LIGHT_COLOR_POOL: [&'static str; 5] = ["#AD0000", "#780DBA", "#006161", "#0F610F", "#474747"];
-const DARK_BG_TEXT_COLOR: &'static str = "#ffffff";
-const LIGHT_BG_TEXT_COLOR: &'static str = "#000000";
+const DARK_COLOR_POOL: [&str; 5] = ["#ff0000", "#D49BF8", "#00FFFF", "#90EE90", "#B0B0B0"];
+const LIGHT_COLOR_POOL: [&str; 5] = ["#AD0000", "#780DBA", "#006161", "#0F610F", "#474747"];
+const DARK_BG_TEXT_COLOR: &str = "#ffffff";
+const LIGHT_BG_TEXT_COLOR: &str = "#000000";
 
-pub fn to_argb(color: &String) -> String {
-    color.replace("#", "FF")
+pub fn to_argb(color: &str) -> String {
+    color.replace('#', "FF")
 }
 
 pub trait CellColorProfile: Debug {
