@@ -17,10 +17,9 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use axum_typed_multipart::{TryFromMultipart, FieldData};
-use calamine::{open_workbook_auto, DataType, Reader};
 use serde_json::json;
 use serde_json::Value;
+use xlsxwriter::worksheet::filter::FilterRule;
 use std::{
     collections::HashMap,
     path::{PathBuf, MAIN_SEPARATOR},
@@ -41,7 +40,6 @@ use utoipa_swagger_ui::SwaggerUi;
         schemas(RowsPayload),
         schemas(ExcelFileForm),
         schemas(Error),
-        schemas()
     )
 )]
 struct APIDoc;
@@ -626,45 +624,29 @@ async fn get_header_row(
         Err(e) => return Err(Error::DatabaseOperationFailed(e.to_string())),
     };
 
-    let mut workbook = match open_workbook_auto(result.file_path) {
-        Err(e) => return Err(Error::IOError(e.to_string())),
-        Ok(wb) => wb,
+    let spreadsheet = match reader::xlsx::read(result.file_path) {
+        Err(e) => return Err(Error::InValidExcelFile(e.to_string())),
+        Ok(ss) => ss,
     };
 
-    let first_sheet = workbook.worksheet_range_at(0);
+    let first_sheet = spreadsheet.get_sheet(&0);
 
-    if first_sheet.is_none() {
+    if first_sheet.is_err() {
         return Err(Error::Generic("No sheet found in excel file".into()));
     }
 
-    let rows_data = match first_sheet.unwrap() {
-        Err(e) => return Err(Error::Generic(e.to_string())),
-        Ok(v) => v,
-    };
+    let first_sheet = first_sheet.unwrap();
 
-    let columns: Vec<String> = rows_data
-        .rows()
-        .take(1)
-        .flat_map(|r| {
-            let mut data = Vec::new();
-            for c in r {
-                let s = match c {
-                    DataType::String(s) => s.to_owned(),
-                    DataType::Int(i) => i.to_string(),
-                    DataType::Float(f) => f.to_string(),
-                    DataType::Bool(b) => b.to_string(),
-                    DataType::DateTime(d) => d.to_string(),
-                    DataType::Duration(d) => d.to_string(),
-                    DataType::DateTimeIso(dt) => dt.to_string(),
-                    DataType::DurationIso(dt) => dt.to_string(),
-                    DataType::Error(e) => e.to_string(),
-                    DataType::Empty => "".to_owned(),
-                };
-                data.push(s);
-            }
-            data
-        })
-        .collect();
+    let mut columns: Vec<String>;
+    if first_sheet.get_highest_row() < 1 {
+        columns = Vec::with_capacity(0);
+    }else {
+        let col_count = first_sheet.get_highest_column();
+        columns = Vec::with_capacity((col_count - 1) as usize);
+        for col_idx in 1..=col_count {
+            columns.push(first_sheet.get_value((col_idx, 1)));
+        }
+    }
 
     let rows = RowsPayload { columns };
     let rows = json!(rows);
@@ -673,7 +655,7 @@ async fn get_header_row(
 }
 
 #[derive(ToSchema)]
-struct ExcelFileForm{ excel: Vec<u8>}
+struct ExcelFileForm{ file: Vec<u8>}
 
 
 #[utoipa::path(
@@ -722,6 +704,11 @@ async fn upload_file(
         return Err(Error::WritingToDisk(fname));
     };
 
+    if let Err(e) = reader::xlsx::read(&file_path) {
+        let _ = fs::remove_file(file_path).await;
+        return Err(Error::InValidExcelFile(e.to_string()));
+    };
+
     let id = datasource.add_file_entry(&file_path).await;
 
     if id.is_err() {
@@ -731,11 +718,6 @@ async fn upload_file(
     let f_entry = UploadFileEntry {
         id: id.unwrap().into(),
         file_path: file_path.to_string_lossy().to_string(),
-    };
-
-    if let Err(e) = open_workbook_auto(&file_path) {
-        let _ = fs::remove_file(file_path).await;
-        return Err(Error::InValidExcelFile(e.to_string()));
     };
 
     Ok((StatusCode::CREATED ,Json(json!(f_entry))))
