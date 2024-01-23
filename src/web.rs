@@ -12,7 +12,7 @@ use aho_corasick::AhoCorasick;
 use axum::{
     body::{self, Bytes},
     extract::{Multipart, Path, State},
-    http::header::{CONTENT_DISPOSITION, CONTENT_TYPE},
+    http::{header::{CONTENT_DISPOSITION, CONTENT_TYPE}, StatusCode},
     response::{AppendHeaders, IntoResponse},
     routing::{get, post},
     Json, Router,
@@ -25,18 +25,21 @@ use std::{
     path::{PathBuf, MAIN_SEPARATOR},
 };
 use tokio::fs;
+use std::fs::File;
 use tokio_util::io::ReaderStream;
 use tracing::{event, instrument, Level};
 use umya_spreadsheet::{reader, writer, Cell};
-use utoipa::OpenApi;
+use utoipa::{OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(get_header_row),
+    paths(get_header_row, upload_file),
     components(
         schemas(UploadFileEntry),
-        schemas(RowsPayload)
+        schemas(RowsPayload),
+        schemas(File_),
+        schemas(Error),
     )
 )]
 struct APIDoc;
@@ -667,10 +670,23 @@ async fn get_header_row(
     Ok(Json(rows))
 }
 
+#[derive(ToSchema)]
+struct File_{ pub file: File}
+
+
+#[utoipa::path(
+    post,
+    path = "/upload",
+    request_body(content_type = "multipart/formdata", content = File_),
+    responses(
+        (status=201, body = UploadFileEntry, description = "id for referencing the uploaded file for subsequent operations"),
+        (status=500, body = Error, description = "Error in multipart form data or no file found error")
+    )
+)]
 async fn upload_file(
     State(datasource): State<SqliteDataSource>,
     mut multipart: Multipart,
-) -> Result<Json<Value>> {
+) -> impl IntoResponse {
     let result = multipart.next_field().await;
 
     if result.is_err() {
@@ -720,5 +736,5 @@ async fn upload_file(
         return Err(Error::InValidExcelFile(e.to_string()));
     };
 
-    Ok(Json(json!(f_entry)))
+    Ok((StatusCode::CREATED ,Json(json!(f_entry))))
 }

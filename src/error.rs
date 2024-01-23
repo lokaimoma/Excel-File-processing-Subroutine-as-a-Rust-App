@@ -4,8 +4,9 @@ use axum::{
     response::IntoResponse,
 };
 use thiserror::Error;
+use utoipa::ToSchema;
 
-#[derive(Debug, Error, Clone)]
+#[derive(Debug, Error, Clone, ToSchema)]
 pub enum Error {
     #[error("Error parsing multipart data: {0}")]
     MultipartFormError(String),
