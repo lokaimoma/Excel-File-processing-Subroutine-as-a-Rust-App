@@ -3,7 +3,7 @@ use axum::extract::Multipart;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::{error::Error, Result};
+use crate::error::Error;
 
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct UploadFileEntry {
@@ -67,7 +67,7 @@ impl JobDetails {
         &self.check_date_cols
     }
 
-    pub async fn try_from(mut value: Multipart) -> Result<Self> {
+    pub async fn try_from(mut value: Multipart) -> Res<Self> {
         let mut file_id: Option<String> = None;
         let mut contraction_file: Option<Bytes> = None;
         let mut search_terms: Vec<String> = Vec::with_capacity(5);

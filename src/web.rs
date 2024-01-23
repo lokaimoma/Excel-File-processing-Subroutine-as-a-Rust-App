@@ -6,7 +6,7 @@ use crate::{
         DataSource,
     },
     error::Error,
-    Result, DATA_DIR_NAME,
+    Result as CrateRes, DATA_DIR_NAME,
 };
 use aho_corasick::AhoCorasick;
 use axum::{
@@ -17,6 +17,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use axum_typed_multipart::{TryFromMultipart, FieldData};
 use calamine::{open_workbook_auto, DataType, Reader};
 use serde_json::json;
 use serde_json::Value;
@@ -25,12 +26,12 @@ use std::{
     path::{PathBuf, MAIN_SEPARATOR},
 };
 use tokio::fs;
-use std::fs::File;
 use tokio_util::io::ReaderStream;
 use tracing::{event, instrument, Level};
 use umya_spreadsheet::{reader, writer, Cell};
 use utoipa::{OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
+
 
 #[derive(OpenApi)]
 #[openapi(
@@ -38,8 +39,9 @@ use utoipa_swagger_ui::SwaggerUi;
     components(
         schemas(UploadFileEntry),
         schemas(RowsPayload),
-        schemas(File_),
+        schemas(ExcelFileForm),
         schemas(Error),
+        schemas()
     )
 )]
 struct APIDoc;
@@ -293,7 +295,7 @@ fn highlight_search_terms_and_contractions(
     cells: &mut [Vec<Cell>],
     job_detail: &JobDetails,
     contraction_str: &[String],
-) -> Result<()> {
+) -> CrateRes<()> {
     let default_color: colors::White = colors::White { color_pool_pos: 0 };
     let black: colors::Black = colors::Black { color_pool_pos: 0 };
     let yellow: colors::Yellow = colors::Yellow { color_pool_pos: 0 };
@@ -497,7 +499,7 @@ fn apply_overlapping_rule(search_findings: Vec<FoundSubTextPosInfo>) -> Vec<Foun
 async fn get_contraction_texts(
     contraction_f_bytes: Option<Bytes>,
     contraction_f_path: &PathBuf,
-) -> Result<Vec<String>> {
+) -> CrateRes<Vec<String>> {
     let mut contraction_str: Vec<String> = Vec::new();
     if contraction_f_bytes.is_some() {
         if let Err(e) = fs::write(&contraction_f_path, contraction_f_bytes.unwrap()).await {
@@ -546,7 +548,7 @@ fn validate_sheet(
     first_row_idx: u32,
     job_detail: &JobDetails,
     last_row_idx: u32,
-) -> Result<()> {
+) -> CrateRes<()> {
     // verify header row has no empty values
     for col_idx in first_col_idx..=last_col_idx {
         let row_val = first_sheet.get_value((col_idx, first_row_idx));
@@ -618,7 +620,7 @@ fn validate_sheet(
 async fn get_header_row(
     State(datasource): State<SqliteDataSource>,
     Path(entry_uuid): Path<String>,
-) -> Result<Json<Value>> {
+) -> CrateRes<Json<Value>> {
     let result = match datasource.get_file_entry(entry_uuid).await {
         Ok(r) => r,
         Err(e) => return Err(Error::DatabaseOperationFailed(e.to_string())),
@@ -671,13 +673,13 @@ async fn get_header_row(
 }
 
 #[derive(ToSchema)]
-struct File_{ pub file: File}
+struct ExcelFileForm{ excel: Vec<u8>}
 
 
 #[utoipa::path(
     post,
     path = "/upload",
-    request_body(content_type = "multipart/formdata", content = File_),
+    request_body(content_type = "multipart/formdata", content = ExcelFileForm),
     responses(
         (status=201, body = UploadFileEntry, description = "id for referencing the uploaded file for subsequent operations"),
         (status=500, body = Error, description = "Error in multipart form data or no file found error")
