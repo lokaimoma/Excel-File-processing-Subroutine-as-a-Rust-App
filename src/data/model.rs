@@ -108,7 +108,7 @@ impl JobDetails {
                 JobDetails::FILE_ID_FIELD_N => file_id = Some(field.text().await?),
                 JobDetails::CONTRACTION_F_FIELD_N => {
                     let bytes = field.bytes().await?;
-                    if bytes.len() == 0 {
+                    if bytes.is_empty() {
                         continue;
                     }
                     contraction_file = Some(bytes);

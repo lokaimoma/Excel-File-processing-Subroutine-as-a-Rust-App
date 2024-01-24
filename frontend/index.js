@@ -50,12 +50,23 @@ contractionDownload.addEventListener("click", (_) => {
           response.text().then((txt) => console.error(txt));
         } else {
           response.blob().then((blob) => {
-            console.log(response.headers);
+            /**
+             * @type {String}
+             */
+            let fileName = excelFileField.files[0].name;
+            const currentDate = new Date();
+            fileName = `${fileName.substring(
+              0,
+              fileName.indexOf(".")
+            )} basic process-${
+              currentDate.getMonth() + 1
+            }${currentDate.getDate()}${currentDate.getFullYear()}${currentDate.getHours()}${currentDate.getMinutes()}`;
             const dldBtn = document.createElement("a");
             dldBtn.style.display = "none";
             const href = URL.createObjectURL(blob);
             dldBtn.href = href;
             dldBtn.setAttribute("target", "_blank");
+            dldBtn.setAttribute("download", fileName);
             dldBtn.click();
             URL.revokeObjectURL(href);
             dldBtn.remove();
