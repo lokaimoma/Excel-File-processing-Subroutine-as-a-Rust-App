@@ -5,7 +5,9 @@
 }
 
 :root {
-    --sort-group-width: 83px;
+    --sort-group-width: 150px;
+    --def-line-height: 1rem;
+    --def-height: 5rem;
 }
 
 body {
@@ -129,7 +131,7 @@ button:disabled:active {
 }
 
 .sortGroup>*.flex {
-    justify-content: space-evenly;
+    justify-content: space-between;
 }
 
 .colHeaders {
@@ -145,7 +147,9 @@ button:disabled:active {
     margin-inline-start: 0.1rem;
     font-size: 1.2rem;
     height: 100%;
-    overflow: auto;
+    overflow-y: auto;
+    line-height: var(--def-line-height);
+    height: var(--def-height);
 }
 
 #startJob {
