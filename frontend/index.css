@@ -1,0 +1,90 @@
+* {
+    box-sizing: border-box;
+    padding: 0;
+    margin: 0;
+}
+
+:root {
+    --sort-group-width: 72px;
+}
+
+body {
+    padding-inline: 0.8rem;
+    /* background-color: maroon; */
+    /* color: white; */
+}
+
+input[type="text"] {
+    font-size: 1rem;
+    font-weight: bold;
+    padding: 0.2rem 0.3rem;
+    width: 10%;
+}
+
+.my-g {
+    margin-block: 1.2rem;
+}
+
+.flex {
+    display: flex;
+}
+
+.gap-g {
+    gap: 1rem;
+}
+
+.gap-s {
+    gap: 0.3rem;
+}
+
+.inputBgRed,
+.inputBgBlue {
+    background-color: red;
+    width: max-content;
+    padding: 0.2rem;
+    display: inline-block;
+    border-bottom: 1px solid
+}
+
+.inputBgBlue {
+    background-color: rgb(6, 212, 248);
+    margin-block: 0.3rem;
+    border: none;
+}
+
+.inputBgRed+label,
+.inputBgBlue+label {
+    border: 1px solid;
+    padding-block: 0.19rem;
+    padding-inline-end: 0.1rem;
+    font-size: 0.7rem;
+}
+
+.inputBgBlue+label {
+    width: min-content;
+}
+
+.sortGroup {
+    border: 1px solid red;
+    width: var(--sort-group-width);
+}
+
+.sortGroup>*.flex {
+    justify-content: space-between;
+}
+
+.colHeaders {
+    background-color: rgb(203, 245, 203);
+    border: 1px solid;
+    width: max-content;
+}
+
+.colHeaders>* {
+    width: var(--sort-group-width);
+    border-inline-end: 1px solid;
+    padding-block: 1rem;
+    margin-inline-start: 0.1rem;
+    font-size: 1.2rem;
+    height: 100%;
+    overflow: auto;
+}

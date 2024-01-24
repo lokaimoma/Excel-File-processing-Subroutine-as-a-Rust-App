@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Basic organize data module</title>
+    <link rel="stylesheet" href="index.css" />
+    <script src="index.js"></script>
+  </head>
+  <body>
+    <form id="excelFileForm" class="my-g">
+      <label for="excelFile">Excel Input: </label>
+      <input type="file" name="file" id="excelFile" required />
+    </form>
+
+    <form id="searchTextsForm" class="my-g flex gap-g">
+      <input type="text" id="sTxt1" placeholder="Search Text" />
+      <input type="text" id="sTxt2" placeholder="Search Text" />
+      <input type="text" id="sTxt3" placeholder="Search Text" />
+      <input type="text" id="sTxt4" placeholder="Search Text" />
+      <input type="text" id="sTxt5" placeholder="Search Text" />
+    </form>
+
+    <div class="flex gap-g">
+      <button id="contractionDownload">Contraction Format Download</button>
+
+      <form>
+        <label for="contraFile">Contraction Data Upload</label>
+        <input type="file" name="contractionFile" id="contraFile" />
+      </form>
+    </div>
+
+    <section id="runJobResultDisplay">
+      <form id="sortDateCheckForm">
+        <div class="sortGroup">
+          <div class="flex gap-s">
+            <div class="inputBgRed">
+              <input
+                type="checkbox"
+                data-row-id="1"
+                data-opp="col-1-desc"
+                name="sortCol"
+                id="col-1-asc"
+                value="asc,1"
+              />
+            </div>
+            <label for="col-1-asc">A-Z Sort</label>
+          </div>
+
+          <div class="flex gap-s">
+            <div class="inputBgRed">
+              <input
+                type="checkbox"
+                name="sortCol"
+                id="col-1-desc"
+                data-opp="col-1-asc"
+                value="desc,1"
+              />
+            </div>
+            <label for="col-1-desc">Z-A Sort</label>
+          </div>
+
+          <div class="flex gap-s">
+            <div class="inputBgBlue">
+              <input
+                type="checkbox"
+                name="checkDate-col-1"
+                id="checkDate-col-1"
+              />
+            </div>
+            <label for="checkDate-col-1">mmddyy Checking</label>
+          </div>
+        </div>
+      </form>
+
+      <div class="colHeaders flex">
+        <p>Hello-1</p>
+        <p>Hello-2</p>
+        <p>Hello-3</p>
+        <p>Hello-4</p>
+        <p>Hello-5</p>
+        <p>Hello-6</p>
+        <p>Hello-7</p>
+        <p>Hello-8</p>
+        <p>Hello-9</p>
+        <p>Hello-10</p>
+      </div>
+    </section>
+
+    <button id="startJob">Start Job</button>
+  </body>
+</html>
