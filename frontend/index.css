@@ -5,13 +5,11 @@
 }
 
 :root {
-    --sort-group-width: 72px;
+    --sort-group-width: 83px;
 }
 
 body {
     padding-inline: 0.8rem;
-    /* background-color: maroon; */
-    /* color: white; */
 }
 
 input[type="text"] {
@@ -21,12 +19,70 @@ input[type="text"] {
     width: 10%;
 }
 
+input[type="file"] {
+    display: none;
+}
+
+#excelFileForm>.flex {
+    align-items: center;
+    gap: 0.3rem;
+}
+
+
+.btn,
+button {
+    border: 2px solid black;
+    padding: 0.4rem 1rem;
+    border-radius: 3px;
+    background-color: #fff;
+    color: #000;
+    font-size: 0.9rem;
+    cursor: pointer;
+    font-weight: bold;
+    box-shadow: 0 4px 10px #0000003a;
+    user-select: none;
+    transition: background-color 120ms ease-in-out, color 120ms ease-in-out;
+    outline: none;
+    display: block;
+}
+
+.btn:hover,
+button:hover {
+    background-color: #000;
+    color: #fff;
+    outline: none;
+}
+
+.btn:active,
+button:active {
+    box-shadow: 0 4px 10px #0000001c;
+}
+
+.btn:disabled,
+button:disabled {
+    color: #0000004d;
+    border-color: grey;
+}
+
+.btn:disabled:hover,
+button:disabled:hover {
+    background-color: #fff;
+    color: #0000004d;
+    cursor: not-allowed;
+}
+
+.btn:disabled:active,
+button:disabled:active {
+    box-shadow: 0 4px 10px #0000003a;
+}
+
 .my-g {
     margin-block: 1.2rem;
 }
 
 .flex {
     display: flex;
+    align-items: center;
 }
 
 .gap-g {
@@ -43,7 +99,8 @@ input[type="text"] {
     width: max-content;
     padding: 0.2rem;
     display: inline-block;
-    border-bottom: 1px solid
+    border-bottom: 1px solid;
+    margin-inline-start: 0.2rem;
 }
 
 .inputBgBlue {
@@ -57,20 +114,22 @@ input[type="text"] {
     border: 1px solid;
     padding-block: 0.19rem;
     padding-inline-end: 0.1rem;
-    font-size: 0.7rem;
+    font-size: 0.9rem;
 }
 
 .inputBgBlue+label {
     width: min-content;
+    font-size: 0.7rem;
 }
 
 .sortGroup {
-    border: 1px solid red;
+    /* border: 1px solid red; */
     width: var(--sort-group-width);
+    /* padding-inline-start: 0.2rem; */
 }
 
 .sortGroup>*.flex {
-    justify-content: space-between;
+    justify-content: space-evenly;
 }
 
 .colHeaders {
@@ -87,4 +146,26 @@ input[type="text"] {
     font-size: 1.2rem;
     height: 100%;
     overflow: auto;
+}
+
+#startJob {
+    margin: auto;
+
+}
+
+#uploadStat {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background-color: grey;
+    margin-block-start: 0.2rem;
+}
+
+#uploadStat.uploaded {
+    background-color: rgb(15, 235, 15);
+}
+
+.contraFileSec.flex {
+    align-items: start;
+    gap: 0.3rem;
 }
