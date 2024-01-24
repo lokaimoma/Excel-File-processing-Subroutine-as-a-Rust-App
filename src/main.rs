@@ -11,7 +11,7 @@ async fn main() {
         .init();
     let app = axum_starter::get_app_router().await.unwrap();
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:6070")
         .await
         .unwrap();
     axum::serve(listener, app).await.unwrap();

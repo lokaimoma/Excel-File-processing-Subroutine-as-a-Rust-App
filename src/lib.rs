@@ -1,9 +1,14 @@
 use axum::Router;
 use std::path::MAIN_SEPARATOR;
 
+use axum::http::Method;
 use data::{sqlite_ds::SqliteDataSource, DataSource};
 use rusqlite::Connection;
-use tower_http::trace::TraceLayer;
+use tower::ServiceBuilder;
+use tower_http::{
+    cors::{Any, CorsLayer},
+    trace::TraceLayer,
+};
 
 mod colors;
 mod data;
@@ -21,8 +26,15 @@ pub async fn get_app_router() -> Result<Router> {
     .unwrap();
     let datasource = SqliteDataSource::new(sqlite_con);
     datasource.init_database().await?;
+    let cors = CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST])
+        .allow_origin(Any);
 
     Ok(Router::new()
         .merge(crate::web::get_routes(datasource))
-        .layer(TraceLayer::new_for_http()))
+        .layer(
+            ServiceBuilder::new()
+                .layer(TraceLayer::new_for_http())
+                .layer(cors),
+        ))
 }
