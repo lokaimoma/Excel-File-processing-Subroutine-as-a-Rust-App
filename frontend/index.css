@@ -125,9 +125,7 @@ button:disabled:active {
 }
 
 .sortGroup {
-    /* border: 1px solid red; */
-    width: var(--sort-group-width);
-    /* padding-inline-start: 0.2rem; */
+    min-width: var(--sort-group-width);
 }
 
 .sortGroup>*.flex {
@@ -172,4 +170,8 @@ button:disabled:active {
 .contraFileSec.flex {
     align-items: start;
     gap: 0.3rem;
+}
+
+#sortDateCheckForm {
+    gap: 0.1rem;
 }
