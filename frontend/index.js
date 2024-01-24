@@ -122,6 +122,7 @@ function createSortControl(columnNumber, labelTxt, order, opp) {
   chkBxInpt.setAttribute("name", "sortCol");
   chkBxInpt.setAttribute("id", `col-${columnNumber}-${order}`);
   chkBxInpt.setAttribute("value", `${order},${order}`);
+  chkBxInpt.addEventListener("change", uncheck_counter);
   const chkLabel = document.createElement("label");
   chkLabel.setAttribute("for", `col-${columnNumber}-${order}`);
   chkLabel.textContent = labelTxt;
