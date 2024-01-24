@@ -6,6 +6,7 @@ const excelFileName = document.querySelector("#fileName");
 const contractionFile = document.querySelector("#contraFile");
 const uploadStat = document.querySelector("#uploadStat");
 const startJob = document.querySelector("#startJob");
+const colHeaderCont = document.querySelector("#headerDisp");
 
 startJob.addEventListener("click", function (_) {
   startJob.disabled = true;
@@ -24,17 +25,42 @@ startJob.addEventListener("click", function (_) {
         });
       } else {
         console.log("File uploaded successfully");
+        return response.json();
       }
-      return response.json();
     })
     .then((json) => {
-      console.log(json);
+      const excelFileField = json["id"];
+      getHeaderRow(excelFileField).then((json) => {
+        const documentFragment = document.createDocumentFragment();
+        for (const columnTitle of json["columns"]) {
+          const p = document.createElement("p");
+          p.textContent = columnTitle;
+          documentFragment.appendChild(p);
+        }
+        colHeaderCont.appendChild(documentFragment);
+      });
     })
     .finally(() => {
       startJob.disabled = false;
       startJob.textContent = "Start Job";
     });
 });
+
+/**
+ *
+ * @param {String} id
+ * @returns {Promise<String[]>}
+ */
+function getHeaderRow(id) {
+  return fetch(`${SERVER_URL}/getHeader/${id}`).then((response) => {
+    if (!response.ok) {
+      response.text().then((txt) => console.error(txt));
+    } else {
+      console.log("Header request successful");
+      return response.json();
+    }
+  });
+}
 
 excelFileField.addEventListener("change", function (e) {
   const target = e.target;
@@ -75,7 +101,7 @@ function uncheck_counter(event) {
   const opp_element = target.dataset.opp;
   if (opp_element) {
     /**
-     * @type(HtmlElement | undefined)
+     * @type {HtmlElement | Undefined}
      */
     const oppelement = document.querySelector(`#${opp_element}`);
 
