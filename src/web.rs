@@ -12,8 +12,8 @@ use aho_corasick::AhoCorasick;
 use axum::{
     body::{self, Bytes},
     extract::{Multipart, Path, State},
-    http::{header::{CONTENT_DISPOSITION, CONTENT_TYPE}, StatusCode},
-    response::{AppendHeaders, IntoResponse},
+    http::{header::{CONTENT_DISPOSITION, CONTENT_TYPE, HeaderMap}, StatusCode},
+    response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
@@ -29,6 +29,7 @@ use tracing::{event, instrument, Level};
 use umya_spreadsheet::{reader, writer, Cell};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
+use chrono::Local;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -176,10 +177,10 @@ async fn run_job(
 ) -> impl IntoResponse {
     let mut job_detail = JobDetails::try_from(multipart).await?;
     event!(Level::DEBUG, "Job details: {:?}", job_detail);
-    let spreadsheet = datasource
+    let file_entry = datasource
         .get_file_entry(job_detail.file_id().to_owned())
         .await?;
-    let spreadsheet = reader::xlsx::read(spreadsheet.file_path);
+    let spreadsheet = reader::xlsx::read(&file_entry.file_path);
     if spreadsheet.is_err() {
         return Err(Error::IOError(spreadsheet.err().unwrap().to_string()));
     }
@@ -283,13 +284,19 @@ async fn run_job(
     let file = fs::File::open(contraction_f_path).await.unwrap();
     let stream = ReaderStream::new(file);
     let stream = body::Body::from_stream(stream);
-    let headers = AppendHeaders([
-        (
-            CONTENT_TYPE,
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        ),
-        (CONTENT_DISPOSITION, "attachment"),
-    ]);
+
+    let mut headers = HeaderMap::new();
+    let file_name = file_entry.file_path;
+    let last_slash_pos = file_name.rfind(MAIN_SEPARATOR);
+    let file_name = &file_name[last_slash_pos.unwrap_or(0)+1..];
+    let full_stop_pos = file_name.rfind('.');
+    let full_stop_pos = full_stop_pos.unwrap_or(file_name.len());
+    let file_name = &file_name[0..full_stop_pos];
+    let dt = Local::now();
+    let formatted_dt = format!("{}", dt.format("%m%d%Y%H%M"));
+    
+    headers.insert(CONTENT_TYPE, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet".parse().unwrap());
+    headers.insert(CONTENT_DISPOSITION, format!("attachment; filename=\"{file_name} basic process-{formatted_dt}\"").parse().unwrap());
 
     Ok((headers, stream))
 }

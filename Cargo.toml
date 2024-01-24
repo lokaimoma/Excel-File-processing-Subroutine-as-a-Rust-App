@@ -26,3 +26,4 @@ tracing-appender = "0.2.3"
 utoipa = { version = "4.2.0", features = ["axum_extras"] }
 utoipa-swagger-ui = { version = "6.0.0", features = ["axum"] }
 tower = "0.4.13"
+chrono = "0.4.31"

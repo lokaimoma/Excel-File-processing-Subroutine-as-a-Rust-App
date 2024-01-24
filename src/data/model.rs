@@ -15,12 +15,9 @@ pub struct RunJobResponse(Vec<u8>);
 pub struct RunJobRequest {
     file_id: String,
     contraction_file: Option<Vec<u8>>,
-    #[schema(example = json!({"search_term": ["SKU"]}))]
-    search_term: Vec<String>,
-    #[schema(example = json!({"check_date": [1,2,3]}))]
-    check_date: Vec<u32>,
-    #[schema(example = json!({"sort_col": ["asc,1", "desc,2", "desc,3", "asc,4"]}))]
-    sort_col: Vec<String>,
+    search_term: Option<Vec<String>>,
+    check_date: Option<Vec<usize>>,
+    sort_col: Option<Vec<String>>,
 }
 
 #[allow(dead_code)]
@@ -111,11 +108,17 @@ impl JobDetails {
                 JobDetails::FILE_ID_FIELD_N => file_id = Some(field.text().await?),
                 JobDetails::CONTRACTION_F_FIELD_N => {
                     let bytes = field.bytes().await?;
+                    if bytes.len() == 0 {
+                        continue;
+                    }
                     contraction_file = Some(bytes);
                 }
                 JobDetails::SEARCH_TERMS_FIELD_N => {
                     if search_t_counter < JobDetails::SEARCH_TERM_COUNTER_LIMIT {
                         let text = field.text().await?;
+                        if text.is_empty() {
+                            continue;
+                        }
                         search_terms.insert(search_t_counter, text);
                         search_t_counter += 1;
                     }
@@ -123,6 +126,9 @@ impl JobDetails {
                 JobDetails::CHECK_DATE_FIELD_N => {
                     let text = field.text().await?;
                     let text = text.trim();
+                    if text.is_empty() {
+                        continue;
+                    }
                     let number = text.parse::<u32>();
                     if number.is_err() {
                         return Err(Error::Generic(format!("Invalid column index: {}", text)));
@@ -134,6 +140,9 @@ impl JobDetails {
                     // order can be asc / desc (lowercase)
                     let text = field.text().await?;
                     let text = text.trim();
+                    if text.is_empty() {
+                        continue;
+                    }
                     let text_parts: Vec<&str> = text.split(',').collect();
                     if text_parts.len() < 2 {
                         return Err(Error::Generic(format!("sortCol data has to be of form order,index Where order can take as value either asc or desc. Got: {}", text)));
