@@ -8,6 +8,71 @@ const uploadStat = document.querySelector("#uploadStat");
 const startJob = document.querySelector("#startJob");
 const colHeaderCont = document.querySelector("#headerDisp");
 const sortDateChkForm = document.querySelector("#sortDateCheckForm");
+const contractionDownload = document.querySelector("#contractionDownload");
+const searchTermsForm = document.querySelector("#searchTextsForm");
+/**
+ * @type {String | undefined}
+ */
+let excelFileFieldId = undefined;
+
+contractionDownload.addEventListener("click", (_) => {
+  startJob.disabled = true;
+  contractionDownload.disabled = true;
+  contractionFile.disabled = true;
+  excelFileField.disabled = true;
+
+  const formData = new FormData();
+  formData.set("fileId", excelFileFieldId);
+
+  if (contractionFile.files.length > 0) {
+    formData.set("contractionFile", contractionFile.files[0]);
+  }
+
+  const searchTerms = new FormData(searchTermsForm);
+  for (const term of searchTerms.values()) {
+    if (term !== "") {
+      formData.append("searchTerm", term);
+    }
+  }
+  const sortDForm = new FormData(sortDateChkForm);
+  for (const pair of sortDForm.entries()) {
+    formData.append(pair[0], pair[1]);
+  }
+
+  fetch(`${SERVER_URL}/runJob`, {
+    method: "post",
+    body: formData,
+  })
+    .then((response) => {
+      if (response) {
+        if (!response.ok) {
+          console.log("Performing downloading contraction result");
+          response.text().then((txt) => console.error(txt));
+        } else {
+          response.blob().then((blob) => {
+            console.log(response.headers);
+            const dldBtn = document.createElement("a");
+            dldBtn.style.display = "none";
+            const href = URL.createObjectURL(blob);
+            dldBtn.href = href;
+            dldBtn.setAttribute("target", "_blank");
+            dldBtn.click();
+            URL.revokeObjectURL(href);
+            dldBtn.remove();
+          });
+        }
+      }
+    })
+    .catch((e) => {
+      console.error(e);
+    })
+    .finally(() => {
+      startJob.disabled = false;
+      contractionDownload.disabled = false;
+      contractionFile.disabled = false;
+      excelFileField.disabled = false;
+    });
+});
 
 startJob.addEventListener("click", function (_) {
   startJob.disabled = true;
@@ -34,8 +99,8 @@ startJob.addEventListener("click", function (_) {
     })
     .then((json) => {
       if (!json) return;
-      const excelFileField = json["id"];
-      getHeaderRow(excelFileField).then((json) => {
+      excelFileFieldId = json["id"];
+      getHeaderRow(excelFileFieldId).then((json) => {
         const headerPopulatorJob = new Promise((resolve, _) => {
           const documentFragment = document.createDocumentFragment();
           for (const columnTitle of json["columns"]) {
@@ -121,7 +186,7 @@ function createSortControl(columnNumber, labelTxt, order, opp) {
   chkBxInpt.dataset.opp = `col-${columnNumber}-${opp}`;
   chkBxInpt.setAttribute("name", "sortCol");
   chkBxInpt.setAttribute("id", `col-${columnNumber}-${order}`);
-  chkBxInpt.setAttribute("value", `${order},${order}`);
+  chkBxInpt.setAttribute("value", `${order},${columnNumber}`);
   chkBxInpt.addEventListener("change", uncheck_counter);
   const chkLabel = document.createElement("label");
   chkLabel.setAttribute("for", `col-${columnNumber}-${order}`);
