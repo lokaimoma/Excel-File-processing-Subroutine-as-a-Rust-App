@@ -15,7 +15,6 @@ startJob.addEventListener("click", function (_) {
   fetch(`${SERVER_URL}/upload`, {
     method: "post",
     body: form,
-    mode: "no-cors",
   })
     .then((response) => {
       console.log(response);
