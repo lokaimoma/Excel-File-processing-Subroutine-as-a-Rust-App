@@ -1,5 +1,5 @@
 [package]
-name = "axum_starter"
+name = "excel_app"
 version = "0.1.0"
 edition = "2021"
 

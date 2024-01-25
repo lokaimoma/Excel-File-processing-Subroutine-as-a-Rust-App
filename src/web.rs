@@ -56,110 +56,6 @@ pub fn get_routes(datasource: SqliteDataSource) -> Router {
         .with_state(datasource)
 }
 
-fn get_cells(
-    work_sheet: &mut umya_spreadsheet::Worksheet,
-    last_row_idx: usize,
-    last_col_idx: usize,
-) -> Vec<Vec<Cell>> {
-    let mut result: Vec<Vec<Cell>> = Vec::new();
-    for row in 2..=last_row_idx {
-        let mut cur_row: Vec<Cell> = Vec::new();
-        for col in 1..=last_col_idx {
-            cur_row.push(
-                work_sheet
-                    .get_cell((col as u32, row as u32))
-                    .unwrap()
-                    .to_owned(),
-            )
-        }
-        result.push(cur_row);
-    }
-    result
-}
-
-fn sort_cells(cells: &mut [Vec<Cell>], sort_infos: &[SortInfo]) {
-    event!(Level::TRACE, "Sorting cells");
-    if sort_infos.is_empty() {
-        event!(Level::TRACE, "No columns to sort");
-        return;
-    }
-
-    let mut sortable_rows: HashMap<String, Vec<usize>> = HashMap::new();
-    let sort_info = &sort_infos[0];
-    let mut col_idx: usize = 0;
-
-    sort_cells_by_range(cells, 0..=(cells.len() - 1), sort_info, &mut col_idx);
-    event!(Level::TRACE, "First sort done...");
-
-    let sort_infos = sort_infos.iter().skip(1).collect::<Vec<_>>();
-    sort_infos.iter().enumerate().for_each(|(i, sort_info)| {
-        event!(Level::TRACE, "Finding sortable rows");
-        clear_build_sortable_rows(cells, col_idx, &mut sortable_rows);
-        event!(Level::TRACE, "Sortable rows found");
-
-        for row_range in sortable_rows
-            .values()
-            .filter(|r| r.len() > 1)
-            .map(|row| row[0]..=row[row.len() - 1])
-        {
-            event!(Level::TRACE, "Performing sub sort in iter #{}", i);
-            sort_cells_by_range(cells, row_range, sort_info, &mut col_idx);
-            event!(Level::TRACE, "Sub sort in iter #{} done", i);
-        }
-    });
-    
-    event!(Level::TRACE, "Done sorting...");
-}
-
-#[inline(always)]
-fn sort_cells_by_range(
-    cells: &mut [Vec<Cell>],
-    row_range: std::ops::RangeInclusive<usize>,
-    sort_info: &SortInfo,
-    col_idx: &mut usize,
-) {
-    cells[row_range].sort_unstable_by(|s1, s2| match sort_info {
-        crate::data::model::SortInfo::Asc { column_index } => {
-            // The column index we are receiving from the user
-            // doesn't start counting from 0, hence the -1 here
-            *col_idx = (column_index.to_owned() - 1) as usize;
-            return s1[*col_idx]
-                .get_value()
-                .as_ref()
-                .partial_cmp(s2[*col_idx].get_value().as_ref())
-                .unwrap();
-        }
-        crate::data::model::SortInfo::Desc { column_index } => {
-            // The column index we are receiving from the user
-            // doesn't start counting from 0, hence the -1 here
-            *col_idx = (column_index.to_owned() - 1) as usize;
-            return s2[*col_idx]
-                .get_value()
-                .as_ref()
-                .partial_cmp(s1[*col_idx].get_value().as_ref())
-                .unwrap();
-        }
-    });
-}
-
-#[inline(always)]
-fn clear_build_sortable_rows(
-    cells: &mut [Vec<Cell>],
-    col_idx: usize,
-    sortable_rows: &mut HashMap<String, Vec<usize>>,
-) {
-    for (idx, row) in cells.iter().enumerate() {
-        let key = row[col_idx].get_value();
-        let value = sortable_rows.get_mut(key.as_ref());
-        if value.is_some() {
-            let value = value.unwrap();
-            value.push(idx);
-        } else {
-            sortable_rows.insert(key.to_string(), vec![idx]);
-        }
-    }
-}
-
 #[utoipa::path(
     post,
     path = "/runJob",
@@ -296,6 +192,223 @@ async fn run_job(
     headers.insert(CONTENT_DISPOSITION, format!("attachment; filename=\"{file_name} basic process-{formatted_dt}\"").parse().unwrap());
 
     Ok((headers, stream))
+}
+
+
+#[utoipa::path(
+    get, 
+    path = "/getHeader/{entry_uuid}", 
+    responses(
+        (status = 200, description = "The header row of the excel file, with each string representing a column", body = RowsPayload)
+    )
+)]
+async fn get_header_row(
+    State(datasource): State<SqliteDataSource>,
+    Path(entry_uuid): Path<String>,
+) -> CrateRes<Json<Value>> {
+    let result = match datasource.get_file_entry(entry_uuid).await {
+        Ok(r) => r,
+        Err(e) => return Err(Error::DatabaseOperationFailed(e.to_string())),
+    };
+
+    let spreadsheet = match reader::xlsx::read(result.file_path) {
+        Err(e) => return Err(Error::InValidExcelFile(e.to_string())),
+        Ok(ss) => ss,
+    };
+
+    let first_sheet = spreadsheet.get_sheet(&0);
+
+    if first_sheet.is_err() {
+        return Err(Error::Generic("No sheet found in excel file".into()));
+    }
+
+    let first_sheet = first_sheet.unwrap();
+
+    let mut columns: Vec<String>;
+    if first_sheet.get_highest_row() < 1 {
+        columns = Vec::with_capacity(0);
+    }else {
+        let col_count = first_sheet.get_highest_column();
+        columns = Vec::with_capacity((col_count - 1) as usize);
+        for col_idx in 1..=col_count {
+            columns.push(first_sheet.get_value((col_idx, 1)));
+        }
+    }
+
+    let rows = RowsPayload { columns };
+    let rows = json!(rows);
+
+    Ok(Json(rows))
+}
+
+
+#[utoipa::path(
+    post,
+    path = "/upload",
+    request_body(content_type = "multipart/form-data", content = ExcelFileForm),
+    responses(
+        (status=201, body = UploadFileEntry, description = "id for referencing the uploaded file for subsequent operations"),
+        (status=500, body = Error, description = "Error in multipart form data or no file found error")
+    )
+)]
+async fn upload_file(
+    State(datasource): State<SqliteDataSource>,
+    mut multipart: Multipart,
+) -> impl IntoResponse {
+    let result = multipart.next_field().await;
+
+    if result.is_err() {
+        return Err(Error::MultipartFormError(result.err().unwrap().body_text()));
+    }
+
+    let field = result.unwrap();
+
+    if field.is_none() {
+        return Err(Error::NoFileUploaded);
+    }
+
+    let field = field.unwrap();
+
+    let fname = field.file_name();
+    if fname.is_none() {
+        return Err(Error::NoFileUploaded);
+    }
+    let fname = fname.unwrap().to_string();
+    let bytes = field.bytes().await.unwrap();
+
+    let mut file_path = PathBuf::from(format!(".{MAIN_SEPARATOR}{DATA_DIR_NAME}"));
+    if !file_path.exists() {
+        let _ = fs::create_dir_all(&file_path).await;
+    }
+    file_path.push(&fname);
+
+    if let Err(e) = fs::write(&file_path, bytes).await {
+        println!("Error writing file");
+        eprintln!("{} : {:?}", e, file_path);
+        return Err(Error::WritingToDisk(fname));
+    };
+
+    if let Err(e) = reader::xlsx::read(&file_path) {
+        let _ = fs::remove_file(file_path).await;
+        return Err(Error::InValidExcelFile(e.to_string()));
+    };
+
+    let id = datasource.add_file_entry(&file_path).await;
+
+    if id.is_err() {
+        return Err(id.err().unwrap());
+    }
+
+    let f_entry = UploadFileEntry {
+        id: id.unwrap().into(),
+        file_path: file_path.to_string_lossy().to_string(),
+    };
+
+    Ok((StatusCode::CREATED ,Json(json!(f_entry))))
+}
+
+fn get_cells(
+    work_sheet: &mut umya_spreadsheet::Worksheet,
+    last_row_idx: usize,
+    last_col_idx: usize,
+) -> Vec<Vec<Cell>> {
+    let mut result: Vec<Vec<Cell>> = Vec::new();
+    for row in 2..=last_row_idx {
+        let mut cur_row: Vec<Cell> = Vec::new();
+        for col in 1..=last_col_idx {
+            cur_row.push(
+                work_sheet
+                    .get_cell((col as u32, row as u32))
+                    .unwrap()
+                    .to_owned(),
+            )
+        }
+        result.push(cur_row);
+    }
+    result
+}
+
+fn sort_cells(cells: &mut [Vec<Cell>], sort_infos: &[SortInfo]) {
+    event!(Level::TRACE, "Sorting cells");
+    if sort_infos.is_empty() {
+        event!(Level::TRACE, "No columns to sort");
+        return;
+    }
+
+    let mut sortable_rows: HashMap<String, Vec<usize>> = HashMap::new();
+    let sort_info = &sort_infos[0];
+    let mut col_idx: usize = 0;
+
+    sort_cells_by_range(cells, 0..=(cells.len() - 1), sort_info, &mut col_idx);
+    event!(Level::TRACE, "First sort done...");
+
+    let sort_infos = sort_infos.iter().skip(1).collect::<Vec<_>>();
+    sort_infos.iter().enumerate().for_each(|(i, sort_info)| {
+        event!(Level::TRACE, "Finding sortable rows");
+        clear_build_sortable_rows(cells, col_idx, &mut sortable_rows);
+        event!(Level::TRACE, "Sortable rows found");
+
+        for row_range in sortable_rows
+            .values()
+            .filter(|r| r.len() > 1)
+            .map(|row| row[0]..=row[row.len() - 1])
+        {
+            event!(Level::TRACE, "Performing sub sort in iter #{}", i);
+            sort_cells_by_range(cells, row_range, sort_info, &mut col_idx);
+            event!(Level::TRACE, "Sub sort in iter #{} done", i);
+        }
+    });
+    
+    event!(Level::TRACE, "Done sorting...");
+}
+
+#[inline(always)]
+fn sort_cells_by_range(
+    cells: &mut [Vec<Cell>],
+    row_range: std::ops::RangeInclusive<usize>,
+    sort_info: &SortInfo,
+    col_idx: &mut usize,
+) {
+    cells[row_range].sort_unstable_by(|s1, s2| match sort_info {
+        crate::data::model::SortInfo::Asc { column_index } => {
+            // The column index we are receiving from the user
+            // doesn't start counting from 0, hence the -1 here
+            *col_idx = (column_index.to_owned() - 1) as usize;
+            return s1[*col_idx]
+                .get_value()
+                .as_ref()
+                .partial_cmp(s2[*col_idx].get_value().as_ref())
+                .unwrap();
+        }
+        crate::data::model::SortInfo::Desc { column_index } => {
+            // The column index we are receiving from the user
+            // doesn't start counting from 0, hence the -1 here
+            *col_idx = (column_index.to_owned() - 1) as usize;
+            return s2[*col_idx]
+                .get_value()
+                .as_ref()
+                .partial_cmp(s1[*col_idx].get_value().as_ref())
+                .unwrap();
+        }
+    });
+}
+
+#[inline(always)]
+fn clear_build_sortable_rows(
+    cells: &mut [Vec<Cell>],
+    col_idx: usize,
+    sortable_rows: &mut HashMap<String, Vec<usize>>,
+) {
+    for (idx, row) in cells.iter().enumerate() {
+        let key = row[col_idx].get_value();
+        let value = sortable_rows.get_mut(key.as_ref());
+        if value.is_some() {
+            let value = value.unwrap();
+            value.push(idx);
+        } else {
+            sortable_rows.insert(key.to_string(), vec![idx]);
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -558,117 +671,4 @@ fn validate_sheet(
         }
     }
     Ok(())
-}
-
-#[utoipa::path(
-    get, 
-    path = "/getHeader/{entry_uuid}", 
-    responses(
-        (status = 200, description = "The header row of the excel file, with each string representing a column", body = RowsPayload)
-    )
-)]
-async fn get_header_row(
-    State(datasource): State<SqliteDataSource>,
-    Path(entry_uuid): Path<String>,
-) -> CrateRes<Json<Value>> {
-    let result = match datasource.get_file_entry(entry_uuid).await {
-        Ok(r) => r,
-        Err(e) => return Err(Error::DatabaseOperationFailed(e.to_string())),
-    };
-
-    let spreadsheet = match reader::xlsx::read(result.file_path) {
-        Err(e) => return Err(Error::InValidExcelFile(e.to_string())),
-        Ok(ss) => ss,
-    };
-
-    let first_sheet = spreadsheet.get_sheet(&0);
-
-    if first_sheet.is_err() {
-        return Err(Error::Generic("No sheet found in excel file".into()));
-    }
-
-    let first_sheet = first_sheet.unwrap();
-
-    let mut columns: Vec<String>;
-    if first_sheet.get_highest_row() < 1 {
-        columns = Vec::with_capacity(0);
-    }else {
-        let col_count = first_sheet.get_highest_column();
-        columns = Vec::with_capacity((col_count - 1) as usize);
-        for col_idx in 1..=col_count {
-            columns.push(first_sheet.get_value((col_idx, 1)));
-        }
-    }
-
-    let rows = RowsPayload { columns };
-    let rows = json!(rows);
-
-    Ok(Json(rows))
-}
-
-
-
-#[utoipa::path(
-    post,
-    path = "/upload",
-    request_body(content_type = "multipart/form-data", content = ExcelFileForm),
-    responses(
-        (status=201, body = UploadFileEntry, description = "id for referencing the uploaded file for subsequent operations"),
-        (status=500, body = Error, description = "Error in multipart form data or no file found error")
-    )
-)]
-async fn upload_file(
-    State(datasource): State<SqliteDataSource>,
-    mut multipart: Multipart,
-) -> impl IntoResponse {
-    let result = multipart.next_field().await;
-
-    if result.is_err() {
-        return Err(Error::MultipartFormError(result.err().unwrap().body_text()));
-    }
-
-    let field = result.unwrap();
-
-    if field.is_none() {
-        return Err(Error::NoFileUploaded);
-    }
-
-    let field = field.unwrap();
-
-    let fname = field.file_name();
-    if fname.is_none() {
-        return Err(Error::NoFileUploaded);
-    }
-    let fname = fname.unwrap().to_string();
-    let bytes = field.bytes().await.unwrap();
-
-    let mut file_path = PathBuf::from(format!(".{MAIN_SEPARATOR}{DATA_DIR_NAME}"));
-    if !file_path.exists() {
-        let _ = fs::create_dir_all(&file_path).await;
-    }
-    file_path.push(&fname);
-
-    if let Err(e) = fs::write(&file_path, bytes).await {
-        println!("Error writing file");
-        eprintln!("{} : {:?}", e, file_path);
-        return Err(Error::WritingToDisk(fname));
-    };
-
-    if let Err(e) = reader::xlsx::read(&file_path) {
-        let _ = fs::remove_file(file_path).await;
-        return Err(Error::InValidExcelFile(e.to_string()));
-    };
-
-    let id = datasource.add_file_entry(&file_path).await;
-
-    if id.is_err() {
-        return Err(id.err().unwrap());
-    }
-
-    let f_entry = UploadFileEntry {
-        id: id.unwrap().into(),
-        file_path: file_path.to_string_lossy().to_string(),
-    };
-
-    Ok((StatusCode::CREATED ,Json(json!(f_entry))))
 }
