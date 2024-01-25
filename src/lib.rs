@@ -8,6 +8,7 @@ use tokio::fs;
 use tower::ServiceBuilder;
 use tower_http::{
     cors::{Any, CorsLayer},
+    services::ServeDir,
     trace::TraceLayer,
 };
 
@@ -36,6 +37,7 @@ pub async fn get_app_router() -> Result<Router> {
 
     Ok(Router::new()
         .merge(crate::web::get_routes(datasource))
+        .nest_service("/", ServeDir::new(format!(".{MAIN_SEPARATOR}frontend")))
         .layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())

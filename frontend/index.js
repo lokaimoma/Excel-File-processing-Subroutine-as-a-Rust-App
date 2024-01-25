@@ -1,6 +1,6 @@
 "use strict";
 
-const SERVER_URL = "http://localhost:6070";
+const SERVER_URL = window.origin;
 const excelFileField = document.querySelector("#excelFile");
 const excelFileName = document.querySelector("#fileName");
 const contractionFile = document.querySelector("#contraFile");
