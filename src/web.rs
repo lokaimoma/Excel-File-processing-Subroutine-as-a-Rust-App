@@ -25,11 +25,12 @@ use std::{
 };
 use tokio::fs;
 use tokio_util::io::ReaderStream;
-use tracing::{event, instrument, Level};
+use tracing::{event, Level};
 use umya_spreadsheet::{reader, writer, Cell};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 use chrono::Local;
+use std::io::Cursor;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -170,7 +171,6 @@ fn clear_build_sortable_rows(
         content = RunJobRequest, content_type = "multipart/form-data"
     )
 )]
-#[instrument]
 async fn run_job(
     State(datasource): State<SqliteDataSource>,
     multipart: Multipart,
@@ -264,24 +264,21 @@ async fn run_job(
     });
     event!(Level::TRACE, "Done mutating spreadsheet");
 
-    let final_f_name = format!("contraction_{}.xlsx", uuid::Uuid::now_v7());
-    let mut contraction_f_path = PathBuf::from(format!(".{MAIN_SEPARATOR}{DATA_DIR_NAME}"));
-    contraction_f_path.push(final_f_name);
+    event!(Level::TRACE, "Writing to in memory file");
+    let mut cursor: Cursor<Vec<u8>> = Cursor::new(Vec::new());
 
-    event!(Level::TRACE, "Saving final contraction file....");
-
-    if let Err(e) = writer::xlsx::write(&spreadsheet, &contraction_f_path) {
+    if let Err(e) = writer::xlsx::write_writer(&spreadsheet, &mut cursor) {
         event!(
             Level::ERROR,
-            message = "Error writing contraction file",
+            message = "Error writing final contraction result to memory",
             error = e.to_string()
         );
         return Err(Error::IOError(e.to_string()));
     };
-    event!(Level::TRACE, "File saved successfully");
+    event!(Level::TRACE, "Done writting");
 
-    let file = fs::File::open(contraction_f_path).await.unwrap();
-    let stream = ReaderStream::new(file);
+    cursor.set_position(0);
+    let stream = ReaderStream::new(cursor);
     let stream = body::Body::from_stream(stream);
 
     let mut headers = HeaderMap::new();
@@ -293,6 +290,7 @@ async fn run_job(
     let file_name = &file_name[0..full_stop_pos];
     let dt = Local::now();
     let formatted_dt = format!("{}", dt.format("%m%d%Y%H%M"));
+    event!(Level::TRACE, "Sending file");
     
     headers.insert(CONTENT_TYPE, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet".parse().unwrap());
     headers.insert(CONTENT_DISPOSITION, format!("attachment; filename=\"{file_name} basic process-{formatted_dt}\"").parse().unwrap());
@@ -333,13 +331,7 @@ fn highlight_search_terms_and_contractions(
     cells.iter_mut().for_each(|row| {
         row.iter_mut().for_each(|cell| {
             let cell_text = cell.get_value().to_string();
-            //  aho_corsick
-            event!(
-                Level::TRACE,
-                message = "Searching cell value for search patterns",
-                cell_value = cell_text,
-                search_patterns = format!("{:?}", search_terms)
-            );
+            
             let mut search_findings: Vec<FoundSubTextPosInfo> = ac
                 .find_overlapping_iter(&cell_text)
                 .map(|finding| FoundSubTextPosInfo {
@@ -350,29 +342,12 @@ fn highlight_search_terms_and_contractions(
 
             search_findings.sort_by(|f1, f2| f1.start_idx.partial_cmp(&f2.start_idx).unwrap());
 
-            event!(
-                Level::DEBUG,
-                message = "Done searching",
-                findings = format!("{:?}", search_findings)
-            );
-
-            event!(
-                Level::TRACE,
-                "Searching for overlaps in search findings, and recalculating their start and end"
-            );
-
             let new_search_findings = apply_overlapping_rule(search_findings);
 
             let mut color_profile: &mut Box<dyn CellColorProfile> = &mut color_profiles[0];
             for (idx, contraction) in contraction_str.iter().enumerate() {
                 if cell_text.trim().eq_ignore_ascii_case(contraction) {
                     let color_idx = idx + 1 % color_profiles.len();
-                    event!(
-                        Level::DEBUG,
-                        "Contraction found for cell value={}, choosing color at idx={}",
-                        cell_text,
-                        color_idx
-                    );
                     color_profile = &mut color_profiles[color_idx];
                     break;
                 }
@@ -393,8 +368,6 @@ fn apply_formatting(
     let mut cell_text = cell.get_value().to_string();
     let cell_style = cell.get_style_mut();
 
-    event!(Level::TRACE, "Current color profile: {:?}", color_profile);
-
     cell_style.set_background_color(colors::to_argb(
         &color_profile.as_ref().get_background_color(),
     ));
@@ -405,7 +378,6 @@ fn apply_formatting(
     ));
 
     let mut offset = 0;
-    event!(Level::TRACE, "Formating text using finds");
     for mut finding in new_search_findings {
         // Adding the html font tags,etc changes the position of the texts
         // we would have to update the position of the findings.
@@ -424,10 +396,7 @@ fn apply_formatting(
         // 29 = html instructions (including the quote surrounding the color hex), color hex = 7
         // The text value is not part, because they've been accounted for already
         offset += 36;
-        event!(Level::DEBUG, "New Text: {}", cell_text);
-        event!(Level::TRACE, "New offset: {}", offset);
     }
-    event!(Level::TRACE, "Setting rich text");
     cell.set_rich_text(umya_spreadsheet::helper::html::html_to_richtext(&cell_text).unwrap());
     color_profile.reset_color_pool_pos();
 }
@@ -439,43 +408,20 @@ fn apply_overlapping_rule(search_findings: Vec<FoundSubTextPosInfo>) -> Vec<Foun
     for i in 0..search_findings.len() {
         let f1 = search_findings[i];
 
-        event!(Level::TRACE, "At index i={}; Finding = {:?}", i, f1);
-
         for j in i + 1..search_findings.len() {
             let f2 = search_findings[j];
             let new_f2 = &mut new_search_findings[j];
 
-            event!(
-                Level::TRACE,
-                "Checking index j={}; Finding = {:?}; New Finding = {:?}",
-                j,
-                f2,
-                new_f2
-            );
-
             let range = f1.start_idx..=f1.end_idx;
 
-            event!(Level::TRACE, "Range of of f1: {:?}", range);
-
             if range.contains(&f2.start_idx) {
-                event!(Level::TRACE, "Start of f2 in f1");
 
                 if range.contains(&f2.end_idx) {
-                    event!(Level::TRACE, "End of f2 in f1");
 
                     new_f2.end_idx = 0;
                     new_f2.start_idx = 0;
-
-                    event!(
-                        Level::TRACE,
-                        "Final findings f2={:?}; new_f2={:?}",
-                        f2,
-                        new_f2
-                    );
                     continue;
                 }
-
-                event!(Level::TRACE, "end of f2 out of f1 range");
 
                 let new_start = f1.end_idx + 1;
                 if new_start > new_f2.start_idx && new_start < new_f2.end_idx {
@@ -484,21 +430,9 @@ fn apply_overlapping_rule(search_findings: Vec<FoundSubTextPosInfo>) -> Vec<Foun
                     new_f2.start_idx = new_f2.end_idx
                 }
 
-                event!(
-                    Level::TRACE,
-                    "Final findings f2={:?}; new_f2={:?}",
-                    f2,
-                    new_f2
-                );
             }
         }
-        event!(
-            Level::DEBUG,
-            message = format!("Iter {}", i),
-            new_search_findings = format!("{:?}", new_search_findings)
-        );
     }
-    event!(Level::TRACE, "Removing findings with start and end = 0");
     let new_search_findings: Vec<FoundSubTextPosInfo> = new_search_findings
         .into_iter()
         .filter(|finding| finding.start_idx != 0 || finding.end_idx != 0)
@@ -506,7 +440,8 @@ fn apply_overlapping_rule(search_findings: Vec<FoundSubTextPosInfo>) -> Vec<Foun
     event!(
         Level::DEBUG,
         message = "Final findings",
-        findings = format!("{:?}", new_search_findings)
+        findings = format!("{:?}", new_search_findings),
+        previous = format!("{:?}",search_findings)
     );
     new_search_findings
 }

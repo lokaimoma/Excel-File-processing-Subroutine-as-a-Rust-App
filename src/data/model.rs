@@ -49,13 +49,27 @@ impl SortInfo {
     const DESC: &'static str = "desc";
 }
 
-#[derive(Debug)]
 pub struct JobDetails {
     file_id: String,
     contraction_file: Option<Bytes>,
     search_terms: Vec<String>,
     check_date_cols: Vec<u32>,
     sort_cols_info: Vec<SortInfo>,
+}
+
+impl std::fmt::Debug for JobDetails {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JobDetails")
+            .field("file_id", &self.file_id)
+            .field(
+                "contraction_file not None",
+                &self.contraction_file.is_some(),
+            )
+            .field("search_terms", &self.search_terms)
+            .field("check_date_cols", &self.check_date_cols)
+            .field("sort_cols_info", &self.sort_cols_info)
+            .finish()
+    }
 }
 
 impl JobDetails {
