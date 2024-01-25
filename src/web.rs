@@ -246,7 +246,6 @@ async fn run_job(
         "Done highlighting search terms and contractions"
     );
 
-    // TODO: mutate excel file
     // We read the cells from row 2 and col 1
     // Hence we have to offset the indexes below
     // by them, to set them at the right place.

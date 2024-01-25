@@ -1,7 +1,7 @@
 use axum::Router;
 use std::path::MAIN_SEPARATOR;
 
-use axum::http::Method;
+use axum::{extract::DefaultBodyLimit, http::Method};
 use data::{sqlite_ds::SqliteDataSource, DataSource};
 use rusqlite::Connection;
 use tower::ServiceBuilder;
@@ -35,6 +35,7 @@ pub async fn get_app_router() -> Result<Router> {
         .layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())
-                .layer(cors),
+                .layer(cors)
+                .layer(DefaultBodyLimit::max(10000000)),
         ))
 }
