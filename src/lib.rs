@@ -4,6 +4,7 @@ use std::path::MAIN_SEPARATOR;
 use axum::{extract::DefaultBodyLimit, http::Method};
 use data::{sqlite_ds::SqliteDataSource, DataSource};
 use rusqlite::Connection;
+use tokio::fs;
 use tower::ServiceBuilder;
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -20,6 +21,9 @@ const DATA_DIR_NAME: &str = "data_";
 pub type Result<T> = std::result::Result<T, error::Error>;
 
 pub async fn get_app_router() -> Result<Router> {
+    fs::create_dir_all(format!(".{MAIN_SEPARATOR}{DATA_DIR_NAME}"))
+        .await
+        .unwrap();
     let sqlite_con = Connection::open(format!(
         ".{MAIN_SEPARATOR}{DATA_DIR_NAME}{MAIN_SEPARATOR}db.sqlite"
     ))
