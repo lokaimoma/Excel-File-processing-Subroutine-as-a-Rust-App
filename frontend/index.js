@@ -46,8 +46,10 @@ contractionDownload.addEventListener("click", (_) => {
     .then((response) => {
       if (response) {
         if (!response.ok) {
-          console.log("Performing downloading contraction result");
-          response.text().then((txt) => console.error(txt));
+          response.text().then((txt) => {
+            alert(`Runjob request error: ${txt}`);
+            console.error(txt);
+          });
         } else {
           response.blob().then((blob) => {
             /**
@@ -75,6 +77,7 @@ contractionDownload.addEventListener("click", (_) => {
       }
     })
     .catch((e) => {
+      alert(`Request error: ${e}`);
       console.error(e);
     })
     .finally(() => {
@@ -98,14 +101,15 @@ startJob.addEventListener("click", function (_) {
       console.log(response);
       if (!response.ok) {
         response.text().then((txt) => {
+          alert(`Upload error: ${txt}`);
           console.error(txt);
         });
       } else {
-        console.log("File uploaded successfully");
         return response.json();
       }
     })
     .catch((e) => {
+      alert(`Request Error ${e}`);
       console.log("Error connecting: ", e);
     })
     .then((json) => {
@@ -217,9 +221,11 @@ function createSortControl(columnNumber, labelTxt, order, opp) {
 function getHeaderRow(id) {
   return fetch(`${SERVER_URL}/getHeader/${id}`).then((response) => {
     if (!response.ok) {
-      response.text().then((txt) => console.error(txt));
+      response.text().then((txt) => {
+        alert(`Header row request error: ${txt}`);
+        console.error(txt);
+      });
     } else {
-      console.log("Header request successful");
       return response.json();
     }
   });
