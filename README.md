@@ -1,4 +1,17 @@
-# Excel Basic process app
+# Excel File processing Subroutine as a Rust App
+I had a task of 
++ Sorting rows in an excel file, such that the sorting in preceeding column is not disrupted by sorting in subsequent columns
++ Finding words/letters in all cells and highlighting them
++ Finding words (which I call contractions) specified in a similar excel file like the one I'm processing (but without any actual data but the same column headers with rows specifying one or more values) to highligth their background
+
+**Sample data**
+![Sample data](https://github.com/lokaimoma/Rust-backend-for-processing-excel-file/assets/46226886/528c0431-7392-46c0-9960-545f4617ed1a)
+**Contraction file**
+![A contraction file](https://github.com/lokaimoma/Rust-backend-for-processing-excel-file/assets/46226886/9da1c80b-2ed5-43ed-b340-7e72875f4e3d)
+**Result after the operation**
+![The resulting file after the operation](https://github.com/lokaimoma/Rust-backend-for-processing-excel-file/assets/46226886/c7f15673-a730-4bfc-a849-4e7609bd234a)
+
+
 
 ## How to run
 
