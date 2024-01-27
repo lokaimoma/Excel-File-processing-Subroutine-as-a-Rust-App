@@ -8,9 +8,7 @@
 
 ## Frontend
 
-- The frontend was built with plain HTML, CSS and Javascript as specified.
-- The files for the frontend can be found in the `frontend` folder.
-- Clicking on the `index.html` file should open the page in the browser and everything should work as expected
+- Open the URL `http://127.0.0.1:6070` in the browser to use the frontend interface
 
 ## Routes
 
